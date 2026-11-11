@@ -44,3 +44,11 @@ Bản baseline cũ vẫn nằm trong `pipeline.py` và `submission.ipynb`.
 Không đăng dữ liệu lớp hay output chứa nguyên văn đánh giá lên GitHub công khai.
 Các notebook công khai đã bỏ output có nguyên văn; chạy cục bộ sẽ tạo lại.
 Không sinh dữ liệu thêm; không dùng LLM/API gán nhãn test.
+
+## Huấn luyện PhoBERT đang chạy
+
+Đã bắt đầu hai thực nghiệm PhoBERT có huấn luyện thực sự: bản cache 4 tầng cuối trên cloud và 12 tầng encoder trên GitHub Actions. **Chưa có điểm validation hoàn tất cho các lượt này**, không tuyên bố đạt 0,90.
+
+- [Theo dõi lượt GitHub Actions](https://github.com/ThienNhi31/KPDLWEB/actions/runs/43050114260).
+- Xem `HUAN_LUYEN_PHO_BERT.md` để chạy trên CPU, resume, và tải mô hình gọn.
+- `finetune_cpu_cached.py` giữ cache riêng tư, kiểm tra đường tính cache khớp encoder đầy đủ trước khi học.
