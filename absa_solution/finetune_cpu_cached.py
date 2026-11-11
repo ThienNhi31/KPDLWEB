@@ -97,11 +97,12 @@ def probabilities(model,batches):
     result=np.concatenate(rows);original=np.empty_like(result);original[order]=result
     return original
 
-def epoch(model,batches,opt,scheduler,pw,accumulation,log_steps):
+def epoch(model,batches,opt,scheduler,pw,accumulation,log_steps,label_weights=None):
     model.train();opt.zero_grad(set_to_none=True);total=0;started=time.perf_counter()
-    lossfn=nn.BCEWithLogitsLoss(pos_weight=pw)
+    lossfn=nn.BCEWithLogitsLoss(pos_weight=pw,reduction='none' if label_weights is not None else 'mean')
     for step,(inputs,counts,y) in enumerate(batches):
         logits=model(inputs,counts);loss=lossfn(logits,y)
+        if label_weights is not None:loss=(loss*label_weights).mean()
         start=(step//accumulation)*accumulation
         (loss/min(accumulation,len(batches)-start)).backward()
         if (step+1)%accumulation==0 or step+1==len(batches):
@@ -147,6 +148,13 @@ def run(a):
         full=model(i,counts);fast=wrapped(c,cc)
         torch.testing.assert_close(full,fast,atol=2e-5,rtol=2e-5)
         print('Cached/full logits parity passed; max error:',float((full-fast).abs().max()),flush=True)
+    if a.init_dir:
+        initial=torch.load(Path(a.init_dir)/'model.pt',map_location='cpu',weights_only=True)
+        base_state=model.state_dict()
+        frozen={n for n,p in model.named_parameters() if not p.requires_grad}
+        assert all(torch.equal(initial[n],base_state[n]) for n in frozen), 'Frozen cache basis differs from initialization model'
+        model.load_state_dict(initial);del initial,base_state
+        print('Warm start:',a.init_dir,'; all frozen tensors match cache basis',flush=True)
     fit_batches=cached_loader(cache,fi,y,a.batch_size,True,a.seed)
     tune_batches=cached_loader(cache,tu,y,a.batch_size)
     val_batches=cached_loader(cache,va,y,a.batch_size)
@@ -154,7 +162,21 @@ def run(a):
     total=math.ceil(len(fit_batches)/a.accumulation)*a.epochs
     scheduler=get_cosine_schedule_with_warmup(opt,int(.08*total),total)
     pw=torch.as_tensor(np.clip(np.sqrt((len(fi)-y[fi].sum(0))/np.maximum(1,y[fi].sum(0))),1,3),dtype=torch.float32)
+    label_weights=None
+    if a.balanced_loss:
+        positives=np.maximum(1,y[fi].sum(0));negatives=np.maximum(1,len(fi)-y[fi].sum(0))
+        pw=torch.as_tensor(np.clip(negatives/positives,.3,30),dtype=torch.float32)
+        scale=len(fi)/(2*negatives)
+        scale*=np.array([.5 if c.endswith('_nhac') else 1 for c in scorer.COLS])
+        label_weights=torch.as_tensor(scale,dtype=torch.float32)
     best=-1;best_epoch=0;history=[];start_epoch=1
+    if a.init_dir and not a.resume:
+        initial_probs=probabilities(wrapped,tune_batches)
+        cuts=tune_thresholds(y[tu],initial_probs)
+        best=main_score(y[tu],predictions(initial_probs,cuts))
+        torch.save({'state_dict':model.state_dict(),'cuts':cuts.tolist(),'epoch':0},out/'best.pt')
+        np.savez_compressed(out/'best_tuning_predictions.npz',scores=initial_probs,labels=y[tu])
+        print('Warm-start tuning F1:',best,flush=True)
     if a.resume:
         previous=torch.load(out/'latest.pt',map_location='cpu',weights_only=True)
         model.load_state_dict(previous['model']);opt.load_state_dict(previous['optimizer'])
@@ -165,7 +187,7 @@ def run(a):
         print('Resuming at epoch',start_epoch,flush=True)
     for ep in range(start_epoch,a.epochs+1):
         ts=time.perf_counter()
-        loss=epoch(wrapped,fit_batches,opt,scheduler,pw,a.accumulation,a.log_steps)
+        loss=epoch(wrapped,fit_batches,opt,scheduler,pw,a.accumulation,a.log_steps,label_weights)
         probs=probabilities(wrapped,tune_batches)
         cuts=tune_thresholds(y[tu],probs);s=main_score(y[tu],predictions(probs,cuts))
         row={'epoch':ep,'loss':loss,'tune_F1':s,'seconds':time.perf_counter()-ts};history.append(row)
@@ -210,6 +232,8 @@ def main():
     p.add_argument('--max-length',type=int,default=160);p.add_argument('--stride',type=int,default=32)
     p.add_argument('--log-steps',type=int,default=25);p.add_argument('--predict-test',action='store_true')
     p.add_argument('--resume',action='store_true')
+    p.add_argument('--init-dir',default=None,help='Warm start from a model with the identical frozen basis')
+    p.add_argument('--balanced-loss',action='store_true',help='Equalize positive/negative loss per label; downweight mention-only labels')
     a=p.parse_args()
     if not 1<=a.layers<=12:p.error('layers must be in [1,12]')
     run(a)

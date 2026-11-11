@@ -1,0 +1,102 @@
+name: Aspect-query supervised CPU training
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/train-aspect-pair-cpu.yml
+      - absa_solution/launch_aspect_pair_training.txt
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: absa-aspect-pair-cpu
+  cancel-in-progress: true
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HF_HOME: /tmp/absa-hf-cache
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '4'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: 'absa_solution/requirements*.txt'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r absa_solution/requirements_phobert.txt
+      - name: Check aspect-conditioned model and labels
+        working-directory: absa_solution
+        run: |
+          python -m py_compile aspect_pair_absa.py export_phobert_adapter.py
+          python - <<'PY'
+          import torch,pandas as pd,numpy as np
+          from aspect_pair_absa import *
+          torch.set_num_threads(2)
+          data=pd.read_csv('../train.csv').iloc[:4]
+          y=data[scorer.COLS].to_numpy(int)
+          tok=AutoTokenizer.from_pretrained(MODEL,revision=REVISION,use_fast=False)
+          ds=PairReviews(data.text,tok,y)
+          assert np.array_equal(ds.labels.numpy().reshape(4,21),y)
+          m=PairModel(unfreeze_layers=4)
+          inputs,counts,labels=next(iter(loader(ds,tok,2)))
+          logits=m(inputs,counts)
+          assert logits.shape==labels.shape==(2,3)
+          loss=nn.BCEWithLogitsLoss()(logits,labels);loss.backward()
+          assert torch.isfinite(loss)
+          print('Shared 3-label head backward passed; 21-label regrouping passed.')
+          PY
+      - name: Train query-conditioned model; no blind test is read
+        working-directory: absa_solution
+        run: |
+          python -u aspect_pair_absa.py --data-dir .. --out-dir aspect_pair_results --cache private_cache/aspect_pair.pt --epochs 6 --patience 2 --layers 4 --threads 4 --batch-size 16 --accumulation 1 --lr 0.00003 --max-length 160 --stride 32 --negatives 2
+      - name: Export train-derived model only
+        working-directory: absa_solution
+        run: |
+          python export_phobert_adapter.py export --model-dir aspect_pair_results --adapter-dir aspect_pair_adapter
+      - name: Add aggregate result summary
+        if: always()
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          p=Path('aspect_pair_results/metrics.json')
+          text='# Aspect-query ABSA CPU\n\n'
+          if p.exists():
+              r=json.loads(p.read_text())
+              text+=f"Validation ABSA-F1: **{r['ABSA_F1']:.4f}**\n\nCI95%: {r['ABSA_F1_CI95']}\n\nTarget 0.90 reached: {r['ABSA_F1'] >= .90}\n"
+          else:text+='No completed validation report yet.\n'
+          text+='\nNo blind-test text or predictions are read/exported by this workflow.\n'
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: aspect-pair-cpu-model-only
+          path: absa_solution/aspect_pair_adapter/
+          retention-days: 3
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aspect-pair-aggregate-progress
+          path: |
+            absa_solution/aspect_pair_results/history.csv
+            absa_solution/aspect_pair_results/metrics.json
+            absa_solution/aspect_pair_results/run_info.json
+            absa_solution/aspect_pair_results/config.json
+            absa_solution/aspect_pair_results/tune_scores.npz
+            absa_solution/aspect_pair_results/validation_scores.npz
+          if-no-files-found: ignore
+          retention-days: 3

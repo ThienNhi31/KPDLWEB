@@ -1,0 +1,1 @@
+Aspect-conditioned shared 3-label model; original-review split before expansion; train-derived model and aggregate metrics only. This workflow does not read or publish blind-test data or predictions.
