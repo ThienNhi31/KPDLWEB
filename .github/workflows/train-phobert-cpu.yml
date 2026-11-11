@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: absa-phobert-cpu
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   train:
@@ -47,7 +47,7 @@ jobs:
       - name: Fine-tune all 12 encoder layers; select using tuning only
         working-directory: absa_solution
         run: |
-          python -u phobert_absa.py train --data-dir .. --out-dir full_phobert_results --unfreeze-layers 12 --epochs 8 --patience 2 --batch-size 4 --accumulation 4 --cpu-threads 2 --lr 0.00002 --max-length 160 --stride 32 --no-refit
+          python -u phobert_absa.py train --data-dir .. --out-dir full_phobert_results --unfreeze-layers 12 --epochs 8 --patience 2 --batch-size 8 --accumulation 2 --cpu-threads 4 --lr 0.00002 --max-length 160 --stride 32 --no-refit
       - name: Export exact compact model without frozen embedding weights
         working-directory: absa_solution
         run: |

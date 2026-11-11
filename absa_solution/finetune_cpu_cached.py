@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
-from torch.utils.data import Dataset,DataLoader,Sampler
+from torch.utils.data import Dataset,DataLoader,Sampler,Subset
 from transformers import AutoTokenizer,get_cosine_schedule_with_warmup
 from phobert_absa import (MODEL,REVISION,PhoBERTABSA,Reviews,loader,seed_everything,
                           split_indices,tune_thresholds,predictions,to_frame,main_score,
@@ -89,8 +89,13 @@ def cached_loader(cache,indices,y,batch_size,shuffle=False,seed=2026):
 @torch.no_grad()
 def probabilities(model,batches):
     model.eval();rows=[]
-    for inputs,counts,_ in batches:rows.append(model(inputs,counts).sigmoid().numpy())
-    return np.concatenate(rows)
+    ds=batches.dataset
+    order=sorted(range(len(ds)),key=lambda i:max(len(w) for w in ds.cache[ds.indices[i]]))
+    ordered=DataLoader(Subset(ds,order),batch_size=batches.batch_size or 8,num_workers=0,
+                       collate_fn=collate,generator=torch.Generator().manual_seed(0))
+    for inputs,counts,_ in ordered:rows.append(model(inputs,counts).sigmoid().numpy())
+    result=np.concatenate(rows);original=np.empty_like(result);original[order]=result
+    return original
 
 def epoch(model,batches,opt,scheduler,pw,accumulation,log_steps):
     model.train();opt.zero_grad(set_to_none=True);total=0;started=time.perf_counter()

@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Sampler
 from transformers import AutoModel, AutoTokenizer, get_cosine_schedule_with_warmup
 from pyvi import ViTokenizer
 from sklearn.model_selection import GroupShuffleSplit
@@ -140,19 +140,47 @@ def tune_thresholds(y, scores):
         cuts.append(float(grid[best[np.argmin(abs(grid[best]-.5))]]))
     return np.array(cuts)
 
+class ReviewBatches(Sampler):
+    def __init__(self,dataset,batch_size,generator,shuffle=True):
+        order=sorted(range(len(dataset)),key=lambda i:max(len(w['input_ids']) for w in dataset.items[i]))
+        self.batches=[order[i:i+batch_size] for i in range(0,len(order),batch_size)]
+        self.generator=generator;self.shuffle=shuffle
+    def __len__(self):return len(self.batches)
+    def __iter__(self):
+        order=(torch.randperm(len(self.batches),generator=self.generator).tolist()
+               if self.shuffle else range(len(self.batches)))
+        for j in order:
+            group=self.batches[j]
+            if self.shuffle:
+                yield [group[i] for i in torch.randperm(len(group),generator=self.generator).tolist()]
+            else:yield group
+
 def loader(dataset, tokenizer, batch_size, shuffle=False, seed=2026):
     g = torch.Generator().manual_seed(seed)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0,
+    if shuffle:
+        return DataLoader(dataset,batch_sampler=ReviewBatches(dataset,batch_size,g),
+                          num_workers=0,collate_fn=Collate(tokenizer),generator=g)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0,
                       collate_fn=Collate(tokenizer), generator=g)
 
 @torch.no_grad()
 def infer(model, batches, device):
     model.eval()
+    restore=None
+    if isinstance(batches.dataset,Reviews):
+        g=torch.Generator().manual_seed(0)
+        sampler=ReviewBatches(batches.dataset,batches.batch_size or 8,g,shuffle=False)
+        restore=[i for group in sampler.batches for i in group]
+        batches=DataLoader(batches.dataset,batch_sampler=sampler,num_workers=0,
+                           collate_fn=batches.collate_fn,generator=g)
     outputs=[]
     for inputs, counts, _ in batches:
         logits = model({k:v.to(device) for k,v in inputs.items()}, counts)
         outputs.append(torch.sigmoid(logits).cpu().numpy())
-    return np.concatenate(outputs, axis=0)
+    result=np.concatenate(outputs, axis=0)
+    if restore is not None:
+        original=np.empty_like(result);original[restore]=result;return original
+    return result
 
 def optimizer_for(model, lr):
     groups = [{'params':[p for p in model.encoder.parameters() if p.requires_grad], 'lr':lr},
@@ -188,9 +216,17 @@ def train_epoch(model, batches, optimizer, scheduler, device, pos_weight, accumu
             print('  batch', step+1, '/', len(batches), 'loss', round(total/(step+1),4), flush=True)
     return total/max(1,len(batches))
 
+def cpu_thread_limit(requested):
+    available=os.cpu_count() or 1
+    try:
+        quota,period=Path('/sys/fs/cgroup/cpu.max').read_text().split()
+        if quota!='max':available=min(available,max(1,int(int(quota)/int(period))))
+    except (FileNotFoundError,ValueError,OSError):pass
+    return max(1,min(requested,available))
+
 def setup(args):
     seed_everything(args.seed)
-    torch.set_num_threads(args.cpu_threads)
+    torch.set_num_threads(cpu_thread_limit(args.cpu_threads))
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     tokenizer = AutoTokenizer.from_pretrained(MODEL, revision=REVISION, use_fast=False,
                                                trust_remote_code=False)
@@ -288,7 +324,7 @@ def fit(args):
 def predict_saved(model_dir,test_path,output,batch_size=4,cpu_threads=3):
     model_dir=Path(model_dir)
     config=json.loads((model_dir/'config.json').read_text())
-    seed_everything(config['seed']);torch.set_num_threads(cpu_threads)
+    seed_everything(config['seed']);torch.set_num_threads(cpu_thread_limit(cpu_threads))
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     tokenizer=AutoTokenizer.from_pretrained(model_dir/'tokenizer',use_fast=False)
     model=PhoBERTABSA(config['model_name'],config['revision'],config['unfreeze_layers'])
