@@ -225,6 +225,7 @@ def fit(args):
         score=main_score(y[tune_idx],predictions(scores,cuts))
         history.append({'epoch':epoch,'loss':loss,'tune_F1':score,'seconds':time.perf_counter()-ts})
         print(json.dumps(history[-1]),flush=True)
+        pd.DataFrame(history).to_csv(out/'history.csv',index=False)
         if score>best:
             best,best_epoch=score,epoch
             torch.save({'state_dict':model.cpu().state_dict(),'thresholds':cuts.tolist(),'epoch':epoch},out/'best.pt')

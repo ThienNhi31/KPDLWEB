@@ -1,0 +1,90 @@
+name: PhoBERT supervised CPU training
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/train-phobert-cpu.yml
+      - absa_solution/launch_phobert_training.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: absa-phobert-cpu
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HF_HOME: /tmp/absa-hf-cache
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '2'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: 'absa_solution/requirements*.txt'
+      - name: Install CPU-only dependencies
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r absa_solution/requirements_phobert.txt
+      - name: Check syntax and run one real training batch
+        working-directory: absa_solution
+        run: |
+          python -m py_compile phobert_absa.py finetune_cpu_cached.py export_phobert_adapter.py
+          python phobert_absa.py smoke --data-dir .. --unfreeze-layers 12 --cpu-threads 2 --max-length 160 --stride 32
+      - name: Fine-tune all 12 encoder layers; select using tuning only
+        working-directory: absa_solution
+        run: |
+          python -u phobert_absa.py train --data-dir .. --out-dir full_phobert_results --unfreeze-layers 12 --epochs 8 --patience 2 --batch-size 4 --accumulation 4 --cpu-threads 2 --lr 0.00002 --max-length 160 --stride 32 --no-refit
+      - name: Export exact compact model without frozen embedding weights
+        working-directory: absa_solution
+        run: |
+          python export_phobert_adapter.py export --model-dir full_phobert_results --adapter-dir phobert_adapter
+      - name: Publish aggregate result in the run summary
+        if: always()
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path('full_phobert_results/metrics.json')
+          text='# PhoBERT CPU training\n\n'
+          if p.exists():
+              r=json.loads(p.read_text())
+              text+=f"Validation ABSA-F1: **{r['ABSA_F1']:.4f}**\n\n"
+              text+=f"Bootstrap CI95%: {r['ABSA_F1_CI95']}\n\n"
+              text+=f"Target 0.90 reached on this validation: {r['ABSA_F1'] >= .90}\n\n"
+              text+='This is validation, not public/private test performance.\n'
+          else:
+              text+='Training has not produced a complete validation report. No F1 claim.\n'
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: phobert-cpu-model-and-submission
+          path: absa_solution/phobert_adapter/
+          retention-days: 3
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phobert-aggregate-progress
+          path: |
+            absa_solution/full_phobert_results/history.csv
+            absa_solution/full_phobert_results/metrics.json
+            absa_solution/full_phobert_results/run_info.json
+          if-no-files-found: ignore
+          retention-days: 3

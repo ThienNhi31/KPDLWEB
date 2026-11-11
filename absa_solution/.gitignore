@@ -11,3 +11,8 @@ test_blind.csv
 submission_demo.csv
 *_results/
 .cache/
+private_cache/
+hf_cache/
+*.pt
+*.pth
+*_adapter/

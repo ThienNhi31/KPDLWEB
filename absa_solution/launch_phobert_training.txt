@@ -1,0 +1,1 @@
+Supervised CPU PhoBERT experiment: 12 encoder layers, frozen embeddings; 8 epochs maximum; tuning-only selection; same validation split. Goal 0.90 is not a measured result.
