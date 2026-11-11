@@ -53,14 +53,14 @@ def split_indices(train, seed=2026):
     return fit, tune, val
 
 class Reviews(Dataset):
-    def __init__(self, texts, tokenizer, labels=None, max_length=256, stride=64):
+    def __init__(self, texts, tokenizer, labels=None, max_length=256, stride=64, segment=True):
         self.items = []
         self.labels = None if labels is None else torch.as_tensor(labels, dtype=torch.float32)
         content_len = max_length-tokenizer.num_special_tokens_to_add(pair=False)
         if not 0 <= stride < content_len:
             raise ValueError('stride must be smaller than available content length')
         for text in texts:
-            segmented = ViTokenizer.tokenize(clean(text))
+            segmented = ViTokenizer.tokenize(clean(text)) if segment else clean(text)
             ids = tokenizer.encode(segmented, add_special_tokens=False)
             chunks = []
             for start in range(0, max(1, len(ids)), content_len-stride):
@@ -228,7 +228,7 @@ def setup(args):
     seed_everything(args.seed)
     torch.set_num_threads(cpu_thread_limit(args.cpu_threads))
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    tokenizer = AutoTokenizer.from_pretrained(MODEL, revision=REVISION, use_fast=False,
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name, revision=args.revision, use_fast=args.fast_tokenizer,
                                                trust_remote_code=False)
     return device, tokenizer
 
@@ -243,11 +243,11 @@ def fit(args):
     fit_idx,tune_idx,val_idx=split_indices(train,args.seed)
     y=train[scorer.COLS].to_numpy(int)
     print('Device:',device,'split:',len(fit_idx),len(tune_idx),len(val_idx),flush=True)
-    datasets={name:Reviews(train.text.iloc[idx],tokenizer,y[idx],args.max_length,args.stride)
+    datasets={name:Reviews(train.text.iloc[idx],tokenizer,y[idx],args.max_length,args.stride,not args.no_segmentation)
               for name,idx in [('fit',fit_idx),('tune',tune_idx),('validation',val_idx)]}
     batches={name:loader(ds,tokenizer,args.batch_size,name=='fit',args.seed) for name,ds in datasets.items()}
     print('Review windows:',{n:sum(map(len,d.items)) for n,d in datasets.items()},flush=True)
-    model=PhoBERTABSA(unfreeze_layers=args.unfreeze_layers).to(device)
+    model=PhoBERTABSA(args.model_name,args.revision,args.unfreeze_layers).to(device)
     optimizer=optimizer_for(model,args.lr)
     updates=math.ceil(len(batches['fit'])/args.accumulation)*args.epochs
     schedule=get_cosine_schedule_with_warmup(optimizer,int(updates*.1),updates)
@@ -265,6 +265,7 @@ def fit(args):
         if score>best:
             best,best_epoch=score,epoch
             torch.save({'state_dict':model.cpu().state_dict(),'thresholds':cuts.tolist(),'epoch':epoch},out/'best.pt')
+            np.savez_compressed(out/'tune_scores.npz',scores=scores,ids=train.id.iloc[tune_idx].to_numpy(dtype=str))
             model.to(device)
         if epoch-best_epoch>=args.patience:
             break
@@ -276,6 +277,7 @@ def fit(args):
     val_scores=infer(model,batches['validation'],device)
     inference_seconds=time.perf_counter()-ts
     vp=predictions(val_scores,cuts)
+    np.savez_compressed(out/'validation_scores.npz',scores=val_scores,ids=train.id.iloc[val_idx].to_numpy(dtype=str))
     gt,pred=to_frame(train.id.iloc[val_idx],y[val_idx]),to_frame(train.id.iloc[val_idx],vp)
     report=scorer.report(gt,pred,n_boot=1000)
     scorer.show(report)
@@ -296,9 +298,9 @@ def fit(args):
         del model,optimizer
         seed_everything(args.seed)
         if device.type=='cuda':torch.cuda.empty_cache()
-        all_ds=Reviews(train.text,tokenizer,y,args.max_length,args.stride)
+        all_ds=Reviews(train.text,tokenizer,y,args.max_length,args.stride,not args.no_segmentation)
         all_batches=loader(all_ds,tokenizer,args.batch_size,True,args.seed)
-        model=PhoBERTABSA(unfreeze_layers=args.unfreeze_layers).to(device)
+        model=PhoBERTABSA(args.model_name,args.revision,args.unfreeze_layers).to(device)
         optimizer=optimizer_for(model,args.lr)
         updates=math.ceil(len(all_batches)/args.accumulation)*best_epoch
         schedule=get_cosine_schedule_with_warmup(optimizer,int(updates*.1),updates)
@@ -307,8 +309,9 @@ def fit(args):
             loss=train_epoch(model,all_batches,optimizer,schedule,device,pw,args.accumulation)
             print('Refit epoch',epoch+1,'loss',loss,flush=True)
     config=vars(args).copy()
-    config.update({'model_name':MODEL,'revision':REVISION,'columns':scorer.COLS,'best_epoch':best_epoch,
-                   'thresholds':cuts.tolist(),'production_refit':not args.no_refit})
+    config.update({'model_name':args.model_name,'revision':args.revision,'columns':scorer.COLS,'best_epoch':best_epoch,
+                   'thresholds':cuts.tolist(),'production_refit':not args.no_refit,
+                   'segment':not args.no_segmentation,'tokenizer_fast':args.fast_tokenizer})
     (out/'config.json').write_text(json.dumps(config,indent=2))
     torch.save(model.cpu().state_dict(),out/'model.pt');model.to(device)
     tokenizer.save_pretrained(out/'tokenizer')
@@ -326,12 +329,12 @@ def predict_saved(model_dir,test_path,output,batch_size=4,cpu_threads=3):
     config=json.loads((model_dir/'config.json').read_text())
     seed_everything(config['seed']);torch.set_num_threads(cpu_thread_limit(cpu_threads))
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    tokenizer=AutoTokenizer.from_pretrained(model_dir/'tokenizer',use_fast=False)
+    tokenizer=AutoTokenizer.from_pretrained(model_dir/'tokenizer',use_fast=config.get('tokenizer_fast',False))
     model=PhoBERTABSA(config['model_name'],config['revision'],config['unfreeze_layers'])
     model.load_state_dict(torch.load(model_dir/'model.pt',map_location='cpu',weights_only=True));model.to(device)
     test=pd.read_csv(test_path)
     assert list(test.columns)==['id','text'] and test.id.is_unique and not test.isna().any().any()
-    ds=Reviews(test.text,tokenizer,None,config['max_length'],config['stride'])
+    ds=Reviews(test.text,tokenizer,None,config['max_length'],config['stride'],config.get('segment',True))
     started=time.perf_counter()
     scores=infer(model,loader(ds,tokenizer,batch_size),device)
     pred=predictions(scores,np.asarray(config['thresholds']))
@@ -343,8 +346,8 @@ def smoke(args):
     """Real pretrained weights, train rows only, one backward pass; not an F1 experiment."""
     device,tokenizer=setup(args)
     train=pd.read_csv(Path(args.data_dir)/'train.csv')
-    ds=Reviews(train.text.iloc[:4],tokenizer,train[scorer.COLS].iloc[:4].to_numpy(),args.max_length,args.stride)
-    model=PhoBERTABSA(unfreeze_layers=args.unfreeze_layers).to(device)
+    ds=Reviews(train.text.iloc[:4],tokenizer,train[scorer.COLS].iloc[:4].to_numpy(),args.max_length,args.stride,not args.no_segmentation)
+    model=PhoBERTABSA(args.model_name,args.revision,args.unfreeze_layers).to(device)
     model.train();opt=optimizer_for(model,args.lr)
     inputs,counts,labels=next(iter(loader(ds,tokenizer,2)))
     ts=time.perf_counter()
@@ -360,6 +363,8 @@ def smoke(args):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('command',choices=['smoke','train','predict'])
+    p.add_argument('--model-name',default=MODEL);p.add_argument('--revision',default=REVISION)
+    p.add_argument('--fast-tokenizer',action='store_true');p.add_argument('--no-segmentation',action='store_true')
     p.add_argument('--data-dir',default='..');p.add_argument('--out-dir',default='phobert_results')
     p.add_argument('--model-dir',default='phobert_results')
     p.add_argument('--test',default='../test_blind.csv');p.add_argument('--output',default='submission_reproduced.csv')

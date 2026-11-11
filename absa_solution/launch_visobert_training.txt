@@ -1,0 +1,1 @@
+Supervised ViSoBERT 12-layer CPU experiment. Native tokenizer without PyVi segmentation; pinned revision; same fit/tuning/validation split. Goal 0.90 is not a measured result.

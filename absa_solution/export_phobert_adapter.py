@@ -35,7 +35,7 @@ def export(folder,out):
     torch.save(adapter,out/'adapter.pt')
     shutil.copyfile(folder/'config.json',out/'config.json')
     shutil.copytree(folder/'tokenizer',out/'tokenizer',dirs_exist_ok=True)
-    for name in ['metrics.json','history.csv','run_info.json','submission.csv']:
+    for name in ['metrics.json','history.csv','run_info.json','submission.csv','tune_scores.npz','validation_scores.npz']:
         if (folder/name).exists():shutil.copyfile(folder/name,out/name)
     # No cache, training text or validation examples are included.
     print('Adapter exported; every omitted tensor exactly matches the pinned pretrained checkpoint.')
@@ -44,10 +44,10 @@ def predict(folder,test_path,out,batch_size,threads):
     torch.set_num_threads(threads)
     cfg,model=load_model(folder)
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu');model.to(device)
-    tokenizer=AutoTokenizer.from_pretrained(Path(folder)/'tokenizer',use_fast=False)
+    tokenizer=AutoTokenizer.from_pretrained(Path(folder)/'tokenizer',use_fast=cfg.get('tokenizer_fast',False))
     test=pd.read_csv(test_path)
     assert list(test.columns)==['id','text'] and test.id.is_unique and not test.isna().any().any()
-    ds=Reviews(test.text,tokenizer,None,cfg['max_length'],cfg['stride'])
+    ds=Reviews(test.text,tokenizer,None,cfg['max_length'],cfg['stride'],cfg.get('segment',True))
     probs=infer(model,loader(ds,tokenizer,batch_size),device)
     to_frame(test.id,predictions(probs,np.asarray(cfg['thresholds']))).to_csv(out,index=False)
     assert score_absa.kiem_tra(out,test_path)==0
