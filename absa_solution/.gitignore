@@ -9,3 +9,5 @@ submission*.csv
 train.csv
 test_blind.csv
 submission_demo.csv
+*_results/
+.cache/

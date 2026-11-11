@@ -1,28 +1,46 @@
-# Lời giải ABSA tiếng Việt
+# Lời giải ABSA tiếng Việt — phương pháp CPU mới
 
-Bản mã nguồn để tải về và tự chạy; không kèm mô hình hoặc dữ liệu.
+**Chưa đạt ABSA-F1 0,98.** Điểm validation:
 
-1. Tải repository bằng **Code → Download ZIP**, giải nén.
-2. Mở terminal trong thư mục `absa_solution/`.
-3. Cài thư viện: `python -m pip install -r requirements.txt`. Python đã dùng: 3.12.14.
-4. Các CSV hiện nằm ở thư mục cha của `absa_solution/`; chạy:
+| Phương pháp | ABSA-F1 |
+|---|---:|
+| NB-SVM ban đầu | 0.7561 |
+| Tách từ + ensemble | 0.7656 |
+| Ngữ cảnh theo khía cạnh | 0.7815 |
+
+Không biết điểm test/private. Xem `KET_QUA_CPU.md` và `PHUONG_PHAP_MOI.md`.
+
+## Chạy trên máy không có GPU
+
+1. Tải repository: **Code → Download ZIP**, giải nén.
+2. Mở terminal trong `absa_solution/`.
+3. Python đã dùng: 3.12.14. Chạy:
 
 ```bash
-python pipeline.py --data-dir .. --out-dir results
-python score_absa.py --kiem-tra results/submission.csv ../test_blind.csv
+python -m pip install -r requirements_cpu.txt
+python scoped_cpu.py train --data-dir .. --out-dir scoped_results
+python score_absa.py --kiem-tra scoped_results/submission.csv ../test_blind.csv
 ```
 
-Hoặc đặt `ABSA_DATA_DIR=..` trước khi mở `submission.ipynb` rồi Run All.
-Nếu dùng dữ liệu giảng viên lưu riêng, thay `..` bằng đường dẫn đó.
+Các CSV hiện ở thư mục cha. Nếu đặt dữ liệu riêng nơi khác, thay `..` bằng
+đường dẫn đó. Hoặc mở `submission_cpu.ipynb`, chọn kernel Python đã cài PyVi,
+và Run All. Chưa có kết quả thì notebook tự huấn luyện. Để bắt buộc fit lại,
+đặt FORCE_TRAIN=True.
 
-Chương trình huấn luyện ba mô hình, tính chỉ số, tạo `results/model.joblib` và
-`results/submission.csv`. Xem HUONG_DAN.md và BAO_CAO.md.
+Chương trình tạo `scoped_results/model.joblib`, báo cáo chỉ số và
+`scoped_results/submission.csv`. Không kèm mô hình/file dự đoán trong bản công khai.
+Xem KET_QUA_CPU.md để biết thời gian đo trên CPU; không cần cài torch cho hướng này.
 
-**ABSA-F1 validation tốt nhất: 0,7561; chưa đạt mốc 0,80. Chưa có điểm private.**
+Hướng tách từ + ensemble khác:
 
-Bản công khai bỏ output có nguyên văn đánh giá trong notebook và báo cáo.
-Chạy notebook tại máy sẽ tạo lại output đó. Không tải dữ liệu lên dịch vụ ngoài
-và không dùng LLM để gán nhãn test. Các tệp sinh ra được bỏ qua bằng .gitignore.
-Không đăng dữ liệu lớp hoặc ví dụ nguyên văn lên repository công khai.
+```bash
+python cpu_ensemble.py train --data-dir .. --out-dir cpu_results
+```
 
-Gói này không chứa file submission hoặc mô hình đã huấn luyện; chạy lại mã để tạo.
+Mã PhoBERT nằm trong `phobert_absa.py`, đã kiểm tra backward nhưng **chưa có
+kết quả train đầy đủ**; chạy CPU chậm. Không coi đó là mô hình đã đạt 0,98.
+
+Bản baseline cũ vẫn nằm trong `pipeline.py` và `submission.ipynb`.
+Không đăng dữ liệu lớp hay output chứa nguyên văn đánh giá lên GitHub công khai.
+Các notebook công khai đã bỏ output có nguyên văn; chạy cục bộ sẽ tạo lại.
+Không sinh dữ liệu thêm; không dùng LLM/API gán nhãn test.

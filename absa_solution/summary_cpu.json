@@ -1,0 +1,115 @@
+{
+  "experiments": {
+    "NB-SVM ban đầu": {
+      "ABSA_F1": 0.7561255284105146,
+      "ABSA_F1_CI95": [
+        0.7393548036272827,
+        0.7717808702972868
+      ],
+      "precision_TB": 0.767699258717408,
+      "recall_TB": 0.750061429821011,
+      "accuracy_TB": 0.9208041425525435,
+      "kappa_TB": 0.7026987815689493,
+      "mcc_TB": 0.7044069009160869,
+      "bal_acc_TB": 0.8477832995083286
+    },
+    "Tách từ + ensemble": {
+      "ABSA_F1": 0.7655857952322037,
+      "ABSA_F1_CI95": [
+        0.7488758254937449,
+        0.7805880621480237
+      ],
+      "precision_TB": 0.7804068192972855,
+      "recall_TB": 0.7600507737583069,
+      "accuracy_TB": 0.9250685348766373,
+      "kappa_TB": 0.7157245598481413,
+      "mcc_TB": 0.7189488006575913,
+      "bal_acc_TB": 0.8556263316111804
+    },
+    "Ngữ cảnh theo khía cạnh": {
+      "ABSA_F1": 0.7815063432156001,
+      "ABSA_F1_CI95": [
+        0.7645133498462879,
+        0.797113718395018
+      ],
+      "precision_TB": 0.8091655811662176,
+      "recall_TB": 0.7681035521046354,
+      "accuracy_TB": 0.9348157173317088,
+      "kappa_TB": 0.7384800431064267,
+      "mcc_TB": 0.7422858923717682,
+      "bal_acc_TB": 0.863466858345279
+    }
+  },
+  "scoped_run": {
+    "method": "aspect_scoped_NB_SVM",
+    "seed": 2026,
+    "tune_F1": 0.8098634372567679,
+    "validation_F1": 0.7815063432156001,
+    "choices": [
+      {
+        "aspect": "nhan_vien",
+        "C": 2,
+        "local_weight": 0.5
+      },
+      {
+        "aspect": "sach_se",
+        "C": 2,
+        "local_weight": 0.5
+      },
+      {
+        "aspect": "vi_tri",
+        "C": 0.5,
+        "local_weight": 0
+      },
+      {
+        "aspect": "phong",
+        "C": 2,
+        "local_weight": 0.5
+      },
+      {
+        "aspect": "gia_tri",
+        "C": 0.5,
+        "local_weight": 0.5
+      },
+      {
+        "aspect": "an_uong",
+        "C": 0.5,
+        "local_weight": 0.5
+      },
+      {
+        "aspect": "tien_nghi",
+        "C": 0.5,
+        "local_weight": 0.5
+      }
+    ],
+    "total_seconds_before_refit": 404.19905610199976,
+    "train_sha256": "665b581d11c5cb59eb5b3e6e730660fdd28567c64392f2e288e375dd082bd95e",
+    "total_seconds_before_test": 508.51341240600004
+  },
+  "cpu_run": {
+    "selected_specs": [
+      [
+        "svm",
+        1,
+        0.5
+      ],
+      [
+        "linear",
+        1,
+        1
+      ]
+    ],
+    "tune_F1": 0.7808129953233245,
+    "validation_F1": 0.7655857952322037,
+    "python": "3.12.14",
+    "cpu_threads": 1,
+    "gpu": false,
+    "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "ram": "MemTotal:       10207480 kB",
+    "full_fit_seconds": 36.92434597700003,
+    "validation_predict_seconds": 0.22300055699997756,
+    "total_seconds_before_test": 135.243455153,
+    "train_sha256": "665b581d11c5cb59eb5b3e6e730660fdd28567c64392f2e288e375dd082bd95e"
+  },
+  "phobert_status": "backward smoke tested only; no full training F1"
+}
