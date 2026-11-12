@@ -1,0 +1,117 @@
+name: Reproducible supervised stacking models on CPU
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/train-stack-models-cpu.yml
+      - absa_solution/launch_stack_models.txt
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: absa-stack-models-cpu
+  cancel-in-progress: true
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      HF_HOME: /tmp/absa-hf-cache
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '4'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: 'absa_solution/requirements*.txt'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r absa_solution/requirements_visobert.txt
+      - name: Train global encoder with cached frozen layers
+        working-directory: absa_solution
+        run: |
+          python -u finetune_cpu_cached.py --data-dir .. --out-dir cached_phobert_results --cache private_cache/phobert_frozen8_160.pt --epochs 12 --layers 4 --threads 4 --batch-size 8 --accumulation 2 --lr 0.00003
+          python export_phobert_adapter.py export --model-dir cached_phobert_results --adapter-dir model_bundle/cached_phobert
+      - name: Refine the supervised global encoder with balanced loss
+        working-directory: absa_solution
+        run: |
+          python -u finetune_cpu_cached.py --data-dir .. --out-dir balanced_phobert_results --cache private_cache/phobert_frozen8_160.pt --epochs 4 --layers 4 --threads 4 --batch-size 8 --accumulation 2 --lr 0.00001 --init-dir cached_phobert_results --balanced-loss
+          python export_phobert_adapter.py export --model-dir balanced_phobert_results --adapter-dir model_bundle/balanced_phobert
+      - uses: actions/download-artifact@v4
+        with:
+          name: aspect-pair-cpu-model-only
+          run-id: 43066031465
+          github-token: ${{ github.token }}
+          path: absa_solution/model_bundle/aspect_pair
+      - uses: actions/download-artifact@v4
+        with:
+          name: visobert-cpu-model-and-submission
+          run-id: 43055573854
+          github-token: ${{ github.token }}
+          path: absa_solution/private_old_visobert_artifact
+      - name: Retain only the ViSoBERT model and train-derived score files
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          src=Path('private_old_visobert_artifact')
+          dst=Path('model_bundle/visobert')
+          dst.mkdir(parents=True,exist_ok=True)
+          for name in ['adapter.pt','config.json','metrics.json','history.csv','run_info.json','tune_scores.npz','validation_scores.npz']:
+              shutil.copyfile(src/name,dst/name)
+          shutil.copytree(src/'tokenizer',dst/'tokenizer',dirs_exist_ok=True)
+          shutil.rmtree(src)
+          assert not list(Path('model_bundle').rglob('submission*.csv'))
+          print('Model bundle contains no blind-test predictions or original review text.')
+          PY
+      - name: Cross-fit meta classifiers using only original tuning reviews
+        working-directory: absa_solution
+        run: |
+          python -u stacked_absa.py fit --data-dir .. --models model_bundle/cached_phobert model_bundle/balanced_phobert model_bundle/aspect_pair model_bundle/visobert --out-dir model_bundle/stacked
+          rm model_bundle/stacked/validation_prediction.csv
+      - name: Add validation summary
+        if: always()
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          text='# Supervised stacking models, CPU only\n\n'
+          for folder in ['cached_phobert_results','balanced_phobert_results','model_bundle/stacked']:
+              p=Path(folder)/'metrics.json'
+              if p.exists():
+                  r=json.loads(p.read_text())
+                  text+=f"{folder}: validation ABSA-F1 **{r['ABSA_F1']:.4f}**, CI95% {r['ABSA_F1_CI95']}\n\n"
+          text+='No blind test is read by training or meta fitting, and no prediction CSV is published.\n'
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: supervised-stacking-models-only
+          path: absa_solution/model_bundle/
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stacking-aggregate-progress
+          path: |
+            absa_solution/cached_phobert_results/history.csv
+            absa_solution/cached_phobert_results/metrics.json
+            absa_solution/balanced_phobert_results/history.csv
+            absa_solution/balanced_phobert_results/metrics.json
+            absa_solution/model_bundle/stacked/metrics.json
+            absa_solution/model_bundle/stacked/run_info.json
+          if-no-files-found: ignore
+          retention-days: 7

@@ -322,7 +322,8 @@ def fit(args):
               'best_tune_F1':best,'validation_predict_seconds':inference_seconds,'total_seconds_before_test':time.perf_counter()-started,
               'train_sha256':hashlib.sha256((Path(args.data_dir)/'train.csv').read_bytes()).hexdigest()}
     (out/'run_info.json').write_text(json.dumps(run_info,indent=2))
-    predict_saved(out,Path(args.data_dir)/'test_blind.csv',out/'submission.csv',args.batch_size,args.cpu_threads)
+    if not args.skip_test:
+        predict_saved(out,Path(args.data_dir)/'test_blind.csv',out/'submission.csv',args.batch_size,args.cpu_threads)
 
 def predict_saved(model_dir,test_path,output,batch_size=4,cpu_threads=3):
     model_dir=Path(model_dir)
@@ -375,6 +376,7 @@ def main():
     p.add_argument('--max-length',type=int,default=256);p.add_argument('--stride',type=int,default=64)
     p.add_argument('--unfreeze-layers',type=int,default=-1,help='-1: full fine-tune; 0: head only; N: last N encoder layers')
     p.add_argument('--no-refit',action='store_true')
+    p.add_argument('--skip-test',action='store_true',help='Train and validate only; do not read blind test data')
     args=p.parse_args()
     if args.epochs<1 or args.batch_size<1 or args.accumulation<1:
         p.error('epochs, batch-size and accumulation must be positive')

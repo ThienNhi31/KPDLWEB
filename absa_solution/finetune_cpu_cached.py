@@ -184,6 +184,7 @@ def run(a):
         best=main_score(y[tu],predictions(initial_probs,cuts))
         torch.save({'state_dict':model.state_dict(),'cuts':cuts.tolist(),'epoch':0},out/'best.pt')
         np.savez_compressed(out/'best_tuning_predictions.npz',scores=initial_probs,labels=y[tu])
+        np.savez_compressed(out/'tune_scores.npz',scores=initial_probs,ids=train.id.iloc[tu].to_numpy(dtype=str))
         print('Warm-start tuning F1:',best,flush=True)
     if a.resume:
         previous=torch.load(out/'latest.pt',map_location='cpu',weights_only=True)
@@ -205,6 +206,7 @@ def run(a):
             best,best_epoch=s,ep
             torch.save({'state_dict':model.state_dict(),'cuts':cuts.tolist(),'epoch':ep},out/'best.pt')
             np.savez_compressed(out/'best_tuning_predictions.npz',scores=probs,labels=y[tu])
+            np.savez_compressed(out/'tune_scores.npz',scores=probs,ids=train.id.iloc[tu].to_numpy(dtype=str))
         torch.save({'model':model.state_dict(),'optimizer':opt.state_dict(),'scheduler':scheduler.state_dict(),
                     'epoch':ep,'torch_rng':torch.get_rng_state(),'loader_rng':fit_batches.generator.get_state(),
                     'best_epoch':best_epoch,'best_tune_F1':best},out/'latest.pt')
@@ -216,6 +218,7 @@ def run(a):
     r=scorer.report(gt,pr,n_boot=1000);scorer.show(r)
     gt.to_csv(out/'validation_truth.csv',index=False);pr.to_csv(out/'validation_prediction.csv',index=False)
     np.savez_compressed(out/'validation_probabilities.npz',scores=val_probs,labels=y[va])
+    np.savez_compressed(out/'validation_scores.npz',scores=val_probs,ids=train.id.iloc[va].to_numpy(dtype=str))
     (out/'metrics.json').write_text(json.dumps(r,ensure_ascii=False,indent=2))
     config={'model_name':MODEL,'revision':REVISION,'unfreeze_layers':a.layers,'seed':a.seed,
             'max_length':a.max_length,'stride':a.stride,'thresholds':cuts.tolist(),'columns':scorer.COLS,
