@@ -195,9 +195,48 @@ def predict(model_dir, test_path, output, model_dirs=None, threads=2, batch_size
     print('Submission SHA256:', file_hash(output), flush=True)
 
 
+def promote(selection_dir, production_dirs, out_dir):
+    """Keep the selected meta coefficients fixed when base encoders are refit."""
+    import shutil
+    selection, out = Path(selection_dir), Path(out_dir)
+    cfg = json.loads((selection / 'config.json').read_text())
+    assert cfg['architecture'] == 'supervised_stacking' and not cfg['production_refit']
+    assert len(production_dirs) == len(cfg['sources'])
+    sources = []
+    fit_rows = []
+    refit_count = 0
+    for folder, source in zip(map(Path, production_dirs), cfg['sources']):
+        c = json.loads((folder / 'config.json').read_text())
+        assert c['seed'] == cfg['seed'] and c['columns'] == cfg['columns']
+        assert c['model_name'] == source['pretrained_model']
+        assert c.get('architecture', 'joint_21') == source['architecture']
+        identity = model_identity(folder)
+        if c.get('production_refit', False):
+            assert c.get('refit_scope') == 'all'
+            assert c.get('selection_identity') == source['identity'], 'Refit provenance differs'
+            refit_count += 1
+        else:
+            assert identity == source['identity'], 'An unchanged source model differs'
+        sources.append({**source, 'path': os.path.relpath(folder.resolve(), out.resolve()),
+            'identity': identity, 'was_refit_on_all_train': bool(c.get('production_refit', False)),
+            'selection_identity': source['identity']})
+        fit_rows.append(c.get('fit_rows', cfg['base_fit_rows']))
+    assert refit_count > 0
+    out.mkdir(parents=True, exist_ok=True)
+    cfg.update(production_refit=True, sources=sources,
+        report_scope='selection_metrics.json measures the pre-refit model only; no held-out score for production',
+        meta_refit=False, selection_base_fit_rows=cfg['base_fit_rows'],
+        base_training_rows_per_source=fit_rows, production_heldout_rows=0)
+    del cfg['base_fit_rows']
+    (out / 'config.json').write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+    shutil.copyfile(selection / 'meta_models.joblib', out / 'meta_models.joblib')
+    shutil.copyfile(selection / 'metrics.json', out / 'selection_metrics.json')
+    print('Production meta retained exactly;', refit_count, 'base encoders refit on all labeled train.')
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('command', choices=['fit', 'predict'])
+    p.add_argument('command', choices=['fit', 'predict', 'promote'])
     p.add_argument('--data-dir', default='..')
     p.add_argument('--models', nargs='+')
     p.add_argument('--out-dir', default='stacked_results')
@@ -213,8 +252,12 @@ def main():
         if not a.models:
             p.error('fit needs --models with the base model directories')
         fit(a.data_dir, a.models, a.out_dir, a.seed)
-    else:
+    elif a.command == 'predict':
         predict(a.model_dir, a.test, a.output, a.models, a.threads, a.batch_size, a.score_cache_dir)
+    else:
+        if not a.models:
+            p.error('promote needs --models with production base model directories')
+        promote(a.model_dir, a.models, a.out_dir)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,92 @@
+name: Refit selected supervised encoders on all train
+on:
+  workflow_run:
+    workflows: [Reproducible supervised stacking models on CPU]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful model-only stacking run
+        required: true
+        default: '43158772777'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: absa-production-refit-cpu
+  cancel-in-progress: false
+jobs:
+  refit:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      HF_HOME: /tmp/absa-hf-cache
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '4'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: 'absa_solution/requirements*.txt'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r absa_solution/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: supervised-stacking-models-only
+          run-id: ${{ github.event.workflow_run.id || inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: absa_solution/selection_models
+      - name: Refit the two global encoders, fixed two epochs each
+        working-directory: absa_solution
+        run: |
+          python -m py_compile refit_cached_absa.py refit_pair_absa.py stacked_absa.py
+          python -u refit_cached_absa.py --data-dir .. --init-dir selection_models/cached_phobert --out-dir production_models/cached_phobert --cache private_cache/phobert_frozen8_160.pt --epochs 2 --threads 4 --batch-size 8 --accumulation 2 --lr 0.00001
+          python -u refit_cached_absa.py --data-dir .. --init-dir selection_models/balanced_phobert --out-dir production_models/balanced_phobert --cache private_cache/phobert_frozen8_160.pt --epochs 2 --threads 4 --batch-size 8 --accumulation 2 --lr 0.00001
+      - name: Refit the aspect-pair encoder on all 4688 training reviews
+        working-directory: absa_solution
+        run: |
+          python -u refit_pair_absa.py --data-dir .. --init-dir selection_models/aspect_pair --out-dir production_pair_full --cache private_cache/production_pair.pt --scope all --epochs 2 --threads 4 --batch-size 16 --accumulation 1 --lr 0.00001 --negatives 2
+          python export_phobert_adapter.py export --model-dir production_pair_full --adapter-dir production_models/aspect_pair
+      - name: Retain selected ViSoBERT and fixed selected meta coefficients
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+          shutil.copytree('selection_models/visobert','production_models/visobert',dirs_exist_ok=True)
+          assert not list(Path('production_models').rglob('submission*.csv'))
+          PY
+          python stacked_absa.py promote --model-dir selection_models/stacked --models production_models/cached_phobert production_models/balanced_phobert production_models/aspect_pair production_models/visobert --out-dir production_models/stacked
+      - name: Explain report scope
+        if: always()
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          text='# Fixed-schedule all-train refit on CPU\n\n'
+          p=Path('selection_models/stacked/metrics.json')
+          if p.exists():
+              r=json.loads(p.read_text())
+              text+=f"PRE-REFIT selection validation ABSA-F1: {r['ABSA_F1']:.4f}\n\n"
+          text+='Three selected encoders receive two fixed additional epochs on all labeled train. The selected ViSoBERT and meta coefficients stay fixed.\n\n'
+          text+='There is no held-out F1 for the refit production model. No blind test is read and no submission CSV is exported. No public score is claimed.\n'
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: production-supervised-models-only
+          path: absa_solution/production_models/
+          retention-days: 7
+          compression-level: 0

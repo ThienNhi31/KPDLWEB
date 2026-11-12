@@ -24,6 +24,7 @@ from phobert_absa import (seed_everything, cpu_thread_limit, split_indices,
     optimizer_for, predictions, to_frame)
 from transformers import AutoTokenizer
 import score_absa as scorer
+from stacked_absa import model_identity
 
 
 def train_epoch(model, batches, opt, scheduler, pw, scale, accumulation):
@@ -61,6 +62,7 @@ def run(a):
     assert cfg.get('architecture') == 'aspect_pair'
     assert not cfg.get('production_refit', False) and cfg['seed'] == a.seed
     source = json.loads((Path(a.init_dir) / 'run_info.json').read_text())
+    source_identity = model_identity(a.init_dir)
     train_path = Path(a.data_dir) / 'train.csv'
     train_hash = hashlib.sha256(train_path.read_bytes()).hexdigest()
     assert source['cache_key']['train_sha256'] == train_hash
@@ -76,7 +78,7 @@ def run(a):
     pairs = fit_pairs + val_pairs
     pair_y = np.array([list(y[i, k*3:k*3+3])+[k] for i, k in pairs])
     tok = AutoTokenizer.from_pretrained(Path(a.init_dir) / 'tokenizer', use_fast=False)
-    depth = 12 - cfg['unfreeze_layers']
+    depth = len(model.encoder.encoder.layer) - cfg['unfreeze_layers']
     key = {'model': cfg['model_name'], 'revision': cfg['revision'], 'frozen_depth': depth,
         'queries': cfg['queries'], 'max_length': cfg['max_length'], 'stride': cfg['stride'],
         'train_sha256': train_hash, 'scope': a.scope, 'seed': a.seed, 'negatives': a.negatives}
@@ -129,6 +131,7 @@ def run(a):
     # The selection report belongs to the PRE-refit model, kept explicitly separate.
     (out / 'selection_metrics.json').write_bytes((Path(a.init_dir) / 'metrics.json').read_bytes())
     cfg.update(production_refit=a.scope == 'all', refit_scope=a.scope,
+        selection_identity=source_identity,
         threshold_source='pre-refit out-of-fit tuning predictions; fixed during refit',
         refit_training=vars(a), refit_epochs=a.epochs, fit_rows=len(fit))
     (out / 'config.json').write_text(json.dumps(cfg, ensure_ascii=False, indent=2))

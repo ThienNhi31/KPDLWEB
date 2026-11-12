@@ -93,3 +93,24 @@ GitHub Actions mới chỉ xuất checkpoint và thống kê từ train, không 
 đoán test. Artifact có hạn lưu: tải model về trước khi hết hạn; source luôn có
 lệnh huấn luyện lại. Gói nộp riêng gồm code, notebook có output, requirements,
 model/link model, hướng dẫn và CSV được chấm; không kèm train/test gốc.
+
+## Bản refit để nộp sau khi cố định lựa chọn
+
+Đây là bước bổ sung đang triển khai, chưa có điểm công khai. Refit dùng toàn bộ
+4.688 review có nhãn, hai epoch cố định với learning rate 1e-5. Không dùng F1
+trên train hoặc validation đã được học để báo thành điểm held-out. Lịch/ngưỡng
+và meta được giữ từ lựa chọn trước refit; có thể không cải thiện điểm test.
+
+```bash
+python refit_cached_absa.py --data-dir .. --init-dir model_bundle/cached_phobert --out-dir production_models/cached_phobert --cache private_cache/phobert_frozen8_160.pt --epochs 2 --threads 2
+python refit_cached_absa.py --data-dir .. --init-dir model_bundle/balanced_phobert --out-dir production_models/balanced_phobert --cache private_cache/phobert_frozen8_160.pt --epochs 2 --threads 2
+python refit_pair_absa.py --data-dir .. --init-dir model_bundle/aspect_pair --out-dir production_pair_full --cache private_cache/production_pair.pt --scope all --epochs 2 --threads 2
+python export_phobert_adapter.py export --model-dir production_pair_full --adapter-dir production_models/aspect_pair
+python stacked_absa.py promote --model-dir model_bundle/stacked --models production_models/cached_phobert production_models/balanced_phobert production_models/aspect_pair model_bundle/visobert --out-dir production_models/stacked
+python stacked_absa.py predict --model-dir production_models/stacked --test ../test_blind.csv --output submission_production.csv --threads 2 --batch-size 8
+```
+
+promote chỉ đổi checkpoint theo đúng provenance, không học lại meta, không dùng
+nhãn validation để hiệu chỉnh thêm. selection_metrics.json là điểm của bộ trước
+refit. Ba PhoBERT học toàn train; ViSoBERT trong cấu hình này giữ nguyên bản fit
+2.812 review. Chưa thể gán điểm 0,96 cho bản này khi chưa qua trang chấm.
