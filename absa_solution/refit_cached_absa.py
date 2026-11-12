@@ -13,8 +13,9 @@ from transformers import AutoTokenizer, get_cosine_schedule_with_warmup
 from export_phobert_adapter import construct_model
 from finetune_cpu_cached import make_cache, CachedModel, cached_loader, epoch
 from phobert_absa import (seed_everything, cpu_thread_limit, Reviews,
-                         optimizer_for, MODEL, REVISION)
+                         optimizer_for, MODEL, REVISION,split_indices,predictions,to_frame)
 from stacked_absa import file_hash, model_identity
+from text_normalization import prepare_texts
 import score_absa as scorer
 
 
@@ -39,6 +40,8 @@ def run(a):
     assert train.id.is_unique and not train.isna().any().any()
     y = train[scorer.COLS].to_numpy(int)
     assert np.isin(y, [0, 1]).all()
+    fi,tu,va=split_indices(train,cfg['seed'])
+    fit=np.concatenate([fi,tu]) if a.scope=='outer80' else np.arange(len(train))
     model = construct_model(cfg)
     state_path = src / 'adapter.pt' if (src / 'adapter.pt').exists() else src / 'model.pt'
     state = torch.load(state_path, map_location='cpu', weights_only=True)
@@ -52,6 +55,8 @@ def run(a):
     depth = len(model.encoder.encoder.layer) - cfg['unfreeze_layers']
     key = {'model': MODEL, 'revision': REVISION, 'frozen_depth': depth,
         'max_length': cfg['max_length'], 'stride': cfg['stride'], 'train_sha256': train_hash}
+    if cfg.get('text_normalizer'):
+        key.update(text_normalizer=cfg['text_normalizer'],text_normalizer_sha256=cfg['text_normalizer_sha256'])
     cp = Path(a.cache)
     cp.parent.mkdir(parents=True, exist_ok=True)
     if cp.exists():
@@ -60,7 +65,7 @@ def run(a):
         cache = saved['cache']
         del saved
     else:
-        ds = Reviews(train.text, tok, y, cfg['max_length'], cfg['stride'])
+        ds = Reviews(prepare_texts(cfg,train.text), tok, y, cfg['max_length'], cfg['stride'])
         cache = make_cache(model, ds, tok, depth, a.batch_size)
         torch.save({'key': key, 'cache': cache}, cp)
         del ds
@@ -69,13 +74,17 @@ def run(a):
         wrapped = CachedAttentionModel(model, depth)
     else:
         wrapped = CachedModel(model, depth)
-    batches = cached_loader(cache, np.arange(len(train)), y, a.batch_size, True, cfg['seed'])
-    positives = np.maximum(1, y.sum(0))
-    negatives = np.maximum(1, len(train) - y.sum(0))
-    pw = torch.as_tensor(np.clip(negatives / positives, .3, 30), dtype=torch.float32)
-    scale = len(train) / (2 * negatives)
-    scale *= np.array([.5 if c.endswith('_nhac') else 1 for c in scorer.COLS])
-    scale = torch.as_tensor(scale, dtype=torch.float32)
+    batches = cached_loader(cache, fit, y, a.batch_size, True, cfg['seed'])
+    positives = np.maximum(1, y[fit].sum(0))
+    negatives = np.maximum(1, len(fit) - y[fit].sum(0))
+    balanced=a.loss=='balanced' or cfg.get('architecture')=='label_attention' or cfg.get('training',{}).get('balanced_loss',False)
+    scale=None
+    if balanced:
+        pw=torch.as_tensor(np.clip(negatives/positives,.3,30),dtype=torch.float32)
+        scale=len(fit)/(2*negatives)
+        scale*=np.array([.5 if c.endswith('_nhac') else 1 for c in scorer.COLS])
+        scale=torch.as_tensor(scale,dtype=torch.float32)
+    else:pw=torch.as_tensor(np.clip(np.sqrt(negatives/positives),1,3),dtype=torch.float32)
     opt = optimizer_for(model, a.lr)
     steps = math.ceil(len(batches) / a.accumulation) * a.epochs
     scheduler = get_cosine_schedule_with_warmup(opt, int(.08*steps), steps)
@@ -87,9 +96,17 @@ def run(a):
         history.append(row)
         pd.DataFrame(history).to_csv(out / 'history.csv', index=False)
         print('EPOCH', json.dumps(row), flush=True)
-    cfg.update(production_refit=True, refit_scope='all', fit_rows=len(train),
+    report=None
+    if a.scope=='outer80':
+        from finetune_cpu_cached import probabilities
+        scores=probabilities(wrapped,cached_loader(cache,va,y,a.batch_size))
+        report=scorer.report(to_frame(train.id.iloc[va],y[va]),to_frame(train.id.iloc[va],predictions(scores,np.asarray(cfg['thresholds']))),n_boot=1000)
+        (out/'metrics.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+        np.savez_compressed(out/'validation_scores.npz',scores=scores,ids=train.id.iloc[va].to_numpy(dtype=str))
+        scorer.show(report)
+    cfg.update(production_refit=a.scope=='all', refit_scope=a.scope, fit_rows=len(fit),
         refit_epochs=a.epochs, refit_training=vars(a), selection_identity=source_identity,
-        threshold_source='fixed pre-refit out-of-fit tuning thresholds')
+        threshold_source='fixed pre-refit out-of-fit tuning thresholds',refit_loss='balanced_per_label' if balanced else 'sqrt_pos_weight')
     (out / 'config.json').write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
     names = {n for n, p in model.named_parameters() if p.requires_grad}
     torch.save({n: t for n, t in model.state_dict().items() if n in names}, out / 'adapter.pt')
@@ -98,7 +115,8 @@ def run(a):
     result_info = {'train_sha256': train_hash, 'cache_key': key, 'source_model': info,
         'selection_identity': source_identity, 'total_seconds': time.perf_counter()-started,
         'torch': str(torch.__version__), 'threads': torch.get_num_threads(), 'gpu': False,
-        'fit_rows': len(train), 'validation_F1': None, 'production_refit': True,
+        'fit_rows': len(fit), 'validation_F1': None if report is None else report['ABSA_F1'], 'production_refit': a.scope=='all',
+        'refit_scope':a.scope,'refit_loss':'balanced_per_label' if balanced else 'sqrt_pos_weight',
         'epochs_fixed_before_refit': a.epochs}
     (out / 'run_info.json').write_text(json.dumps(result_info, ensure_ascii=False, indent=2))
     print('FINAL', json.dumps(result_info), flush=True)
@@ -115,6 +133,8 @@ def main():
     p.add_argument('--batch-size', type=int, default=8)
     p.add_argument('--accumulation', type=int, default=2)
     p.add_argument('--lr', type=float, default=1e-5)
+    p.add_argument('--scope',choices=['all','outer80'],default='all')
+    p.add_argument('--loss',choices=['balanced','preserve'],default='balanced')
     a = p.parse_args()
     if min(a.epochs, a.threads, a.batch_size, a.accumulation) < 1:
         p.error('Epochs, threads, batch size and accumulation must be positive')
