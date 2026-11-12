@@ -11,6 +11,11 @@ import numpy as np
 import score_absa
 
 def construct_model(cfg):
+    if cfg.get('architecture')=='nli_questions':
+        from nli_question_absa import NLIQuestionModel
+        m=NLIQuestionModel(cfg['model_name'],cfg['revision'],cfg['unfreeze_layers'])
+        assert m.entailment_index==cfg['entailment_index']
+        return m
     if cfg.get('architecture')=='label_attention':
         from label_attention_absa import LabelAttentionModel
         return LabelAttentionModel(cfg['model_name'],cfg['revision'],cfg['unfreeze_layers'])
@@ -61,13 +66,17 @@ def predict(folder,test_path,out,batch_size,threads):
     from text_normalization import prepare_texts
     texts=prepare_texts(cfg,test.text)
     paired=cfg.get('architecture')=='aspect_pair'
-    if paired:
+    questions=cfg.get('architecture')=='nli_questions'
+    if questions:
+        from nli_question_absa import NLIQuestionReviews
+        ds=NLIQuestionReviews(texts,tokenizer,max_length=cfg['max_length'],stride=cfg['stride'],hypotheses=cfg['hypotheses'])
+    elif paired:
         from aspect_pair_absa import PairReviews
         ds=PairReviews(texts,tokenizer,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'),segment=cfg.get('segment',True))
     else:
         ds=Reviews(texts,tokenizer,None,cfg['max_length'],cfg['stride'],cfg.get('segment',True))
     probs=infer(model,loader(ds,tokenizer,batch_size),device)
-    if paired:probs=probs.reshape(len(test),21)
+    if paired or questions:probs=probs.reshape(len(test),21)
     to_frame(test.id,predictions(probs,np.asarray(cfg['thresholds']))).to_csv(out,index=False)
     assert score_absa.kiem_tra(out,test_path)==0
 

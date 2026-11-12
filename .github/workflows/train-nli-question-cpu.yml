@@ -1,0 +1,82 @@
+name: Supervised ABSA with pretrained NLI classifier head
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/train-nli-question-cpu.yml
+      - absa_solution/launch_nli_question.txt
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: absa-nli-question-cpu
+  cancel-in-progress: true
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HF_HOME: /tmp/absa-hf-cache
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '4'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: 'absa_solution/requirements*.txt'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r absa_solution/requirements.txt
+      - name: Verify original NLI head backward on labeled training reviews
+        working-directory: absa_solution
+        run: |
+          python -m py_compile nli_question_absa.py export_phobert_adapter.py neural_evaluation.py
+          python -u nli_question_absa.py --data-dir .. --smoke --threads 4 --batch-size 2
+      - name: Fine-tune binary label descriptions, train labels only
+        working-directory: absa_solution
+        run: |
+          python -u nli_question_absa.py --data-dir .. --out-dir nli_question_results --epochs 2 --patience 1 --layers 4 --threads 4 --batch-size 8 --accumulation 2 --lr 0.00001 --max-length 192 --stride 32 --negatives 3
+      - name: Summarize measured validation
+        if: always()
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os,json
+          p=Path('nli_question_results/metrics.json')
+          text='# Supervised ABSA, original NLI classification head\n\n'
+          if p.exists():
+              r=json.loads(p.read_text())
+              text+=f"Validation ABSA-F1: **{r['ABSA_F1']:.4f}**; CI95% {r['ABSA_F1_CI95']}\n\nTarget 0.96 reached on validation: {r['ABSA_F1']>=.96}\n"
+          else:text+='No completed validation report yet.\n'
+          text+='\nA local discriminative encoder is fine-tuned from training labels. Fixed label descriptions are metadata, no text generation or prediction API. No blind test is read/exported.\n'
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: nli-question-cpu-model-only
+          path: absa_solution/nli_question_results/
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nli-question-aggregate-progress
+          path: |
+            absa_solution/nli_question_results/history.csv
+            absa_solution/nli_question_results/metrics.json
+            absa_solution/nli_question_results/config.json
+            absa_solution/nli_question_results/run_info.json
+            absa_solution/nli_question_results/tune_scores.npz
+            absa_solution/nli_question_results/validation_scores.npz
+          if-no-files-found: ignore
+          retention-days: 7

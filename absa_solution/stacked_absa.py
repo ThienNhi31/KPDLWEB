@@ -30,7 +30,8 @@ def file_hash(path):
 def model_identity(folder):
     folder = Path(folder)
     cfg_path = folder / 'config.json'
-    state = folder / 'adapter.pt' if (folder / 'adapter.pt').exists() else folder / 'model.pt'
+    state = next((folder/name for name in ['adapter.pt','model.pt','model.joblib'] if (folder/name).exists()),None)
+    if state is None:raise FileNotFoundError('No trained checkpoint in '+str(folder))
     return {'config_sha256': file_hash(cfg_path), 'weights_sha256': file_hash(state)}
 
 
@@ -174,9 +175,16 @@ def predict(model_dir, test_path, output, model_dirs=None, threads=2, batch_size
                     assert np.array_equal(saved['ids'], test.id.to_numpy(dtype=str))
                     scores = saved['scores'].copy()
         if scores is None:
-            base_cfg, model, tok = open_model(folder, threads)
-            scores = probabilities_for(base_cfg, model, tok, test.text, batch_size)
-            del model, tok
+            base_cfg=json.loads((folder/'config.json').read_text())
+            if base_cfg.get('architecture')=='classical_scoped':
+                from classical_source import probabilities as sparse_probabilities
+                bundle=joblib.load(folder/'model.joblib')
+                scores=sparse_probabilities(bundle,test.text)
+                del bundle
+            else:
+                base_cfg, model, tok = open_model(folder, threads)
+                scores = probabilities_for(base_cfg, model, tok, test.text, batch_size)
+                del model, tok
             gc.collect()
             if cp is not None:
                 cp.parent.mkdir(parents=True, exist_ok=True)
