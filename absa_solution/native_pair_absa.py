@@ -39,12 +39,12 @@ def run(a):
     pairs = [choose_pairs(fi, y, a.negatives, a.seed),
              [(int(i), k) for i in tu for k in range(7)],
              [(int(i), k) for i in va for k in range(7)]]
-    tok = AutoTokenizer.from_pretrained(NATIVE_MODEL, revision=NATIVE_REVISION,
+    tok = AutoTokenizer.from_pretrained(a.model_name, revision=a.revision,
         use_fast=True, trust_remote_code=False)
     datasets = [PairReviews(train.text, tok, y, p, a.max_length, a.stride,
                 queries=QUERIES, segment=False) for p in pairs]
     batches = [loader(ds, tok, a.batch_size, j == 0, a.seed) for j, ds in enumerate(datasets)]
-    model = PairModel(NATIVE_MODEL, NATIVE_REVISION, a.layers).to(device)
+    model = PairModel(a.model_name, a.revision, a.layers).to(device)
     assert model.encoder.config.model_type == 'deberta-v2'
     print('Original review split:', len(fi), len(tu), len(va),
           'pair counts:', [len(p) for p in pairs], flush=True)
@@ -94,7 +94,7 @@ def run(a):
     (out / 'metrics.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
     np.savez_compressed(out / 'validation_scores.npz', scores=scores,
                         ids=train.id.iloc[va].to_numpy(dtype=str))
-    cfg = {'architecture': 'aspect_pair', 'model_name': NATIVE_MODEL, 'revision': NATIVE_REVISION,
+    cfg = {'architecture': 'aspect_pair', 'model_name': a.model_name, 'revision': a.revision,
         'unfreeze_layers': a.layers, 'seed': a.seed, 'max_length': a.max_length, 'stride': a.stride,
         'queries': QUERIES, 'segment': False, 'tokenizer_fast': True, 'columns': scorer.COLS,
         'thresholds': cuts.tolist(), 'best_epoch': best_epoch, 'production_refit': False,
@@ -129,6 +129,8 @@ def main():
     p.add_argument('--stride', type=int, default=32)
     p.add_argument('--negatives', type=int, default=2)
     p.add_argument('--smoke', action='store_true')
+    p.add_argument('--model-name',default=NATIVE_MODEL)
+    p.add_argument('--revision',default=NATIVE_REVISION)
     a = p.parse_args()
     if min(a.epochs, a.patience, a.layers, a.threads, a.batch_size, a.accumulation) < 1:
         p.error('Positive epoch/layer/thread/batch/accumulation values required')
