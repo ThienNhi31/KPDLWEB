@@ -1,0 +1,86 @@
+name: mDeBERTa native-tokenizer aspect pair CPU training
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/train-native-pair-cpu.yml
+      - absa_solution/launch_native_pair.txt
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: absa-native-pair-cpu
+  cancel-in-progress: true
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HF_HOME: /tmp/absa-hf-cache
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '4'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: 'absa_solution/requirements*.txt'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r absa_solution/requirements.txt
+      - name: Native tokenizer and real DeBERTa backward check on train
+        working-directory: absa_solution
+        run: |
+          python -m py_compile native_pair_absa.py phobert_absa.py aspect_pair_absa.py
+          python -u native_pair_absa.py --data-dir .. --smoke --threads 4 --batch-size 2
+      - name: Train supervised aspect pairs, original review split, CPU only
+        working-directory: absa_solution
+        run: |
+          python -u native_pair_absa.py --data-dir .. --out-dir native_pair_results --epochs 6 --patience 2 --layers 4 --threads 4 --batch-size 8 --accumulation 2 --lr 0.00002 --max-length 160 --stride 32 --negatives 2
+      - name: Export trained model only
+        working-directory: absa_solution
+        run: |
+          python export_phobert_adapter.py export --model-dir native_pair_results --adapter-dir native_pair_adapter
+      - name: Add measured validation summary
+        if: always()
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          text='# Supervised mDeBERTa native-tokenizer aspect pairs\n\n'
+          p=Path('native_pair_results/metrics.json')
+          if p.exists():
+              r=json.loads(p.read_text())
+              text+=f"Validation ABSA-F1 **{r['ABSA_F1']:.4f}**, CI95% {r['ABSA_F1_CI95']}\n\nTarget 0.96 reached on validation: {r['ABSA_F1']>=.96}\n"
+          else:text+='No completed validation report yet.\n'
+          text+='\nThis workflow reads train only, uses a discriminative encoder fine-tuned with ground-truth training labels, and exports no blind-test predictions.\n'
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: native-pair-cpu-model-only
+          path: absa_solution/native_pair_adapter/
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-pair-aggregate-progress
+          path: |
+            absa_solution/native_pair_results/history.csv
+            absa_solution/native_pair_results/metrics.json
+            absa_solution/native_pair_results/config.json
+            absa_solution/native_pair_results/run_info.json
+            absa_solution/native_pair_results/tune_scores.npz
+            absa_solution/native_pair_results/validation_scores.npz
+          if-no-files-found: ignore
+          retention-days: 7

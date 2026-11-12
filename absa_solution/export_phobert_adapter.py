@@ -61,7 +61,7 @@ def predict(folder,test_path,out,batch_size,threads):
     paired=cfg.get('architecture')=='aspect_pair'
     if paired:
         from aspect_pair_absa import PairReviews
-        ds=PairReviews(test.text,tokenizer,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'))
+        ds=PairReviews(test.text,tokenizer,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'),segment=cfg.get('segment',True))
     else:
         ds=Reviews(test.text,tokenizer,None,cfg['max_length'],cfg['stride'],cfg.get('segment',True))
     probs=infer(model,loader(ds,tokenizer,batch_size),device)

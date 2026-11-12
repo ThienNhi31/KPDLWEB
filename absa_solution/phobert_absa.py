@@ -19,7 +19,7 @@ import pandas as pd
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader, Sampler
-from transformers import AutoModel, AutoTokenizer, get_cosine_schedule_with_warmup
+from transformers import AutoConfig, AutoModel, AutoTokenizer, get_cosine_schedule_with_warmup
 from pyvi import ViTokenizer
 from sklearn.model_selection import GroupShuffleSplit
 import score_absa as scorer
@@ -93,12 +93,16 @@ class Collate:
 class PhoBERTABSA(nn.Module):
     def __init__(self, model_name=MODEL, revision=REVISION, unfreeze_layers=-1):
         super().__init__()
-        self.encoder = AutoModel.from_pretrained(model_name, revision=revision, trust_remote_code=False,
-                                                 add_pooling_layer=False)
+        config = AutoConfig.from_pretrained(model_name, revision=revision, trust_remote_code=False)
+        options = {'add_pooling_layer': False} if config.model_type in ['bert','roberta','xlm-roberta'] else {}
+        self.encoder = AutoModel.from_pretrained(model_name, revision=revision, config=config,
+                                                 trust_remote_code=False, **options)
         hidden = self.encoder.config.hidden_size
         self.head = nn.Sequential(nn.Dropout(.2), nn.Linear(hidden, hidden), nn.Tanh(),
                                   nn.Dropout(.2), nn.Linear(hidden, len(scorer.COLS)))
         if unfreeze_layers >= 0:
+            if unfreeze_layers > len(self.encoder.encoder.layer):
+                raise ValueError('Requested more trainable layers than the encoder has')
             for p in self.encoder.parameters():
                 p.requires_grad = False
             if unfreeze_layers:

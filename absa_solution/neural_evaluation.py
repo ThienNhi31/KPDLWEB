@@ -24,7 +24,7 @@ def open_model(folder,threads=2):
 def probabilities_for(cfg,model,tok,texts,batch_size=8):
     if cfg.get('architecture')=='aspect_pair':
         from aspect_pair_absa import PairReviews
-        ds=PairReviews(texts,tok,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'))
+        ds=PairReviews(texts,tok,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'),segment=cfg.get('segment',True))
     else:ds=Reviews(texts,tok,None,cfg['max_length'],cfg['stride'],cfg.get('segment',True))
     probs=infer(model,loader(ds,tok,batch_size),torch.device('cpu'))
     return probs.reshape(len(texts),21)

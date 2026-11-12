@@ -184,7 +184,7 @@ def predict(model_dir, test_path, output, model_dirs=None, threads=2, batch_size
                     test_sha256=test_hash, weights_sha256=source['identity']['weights_sha256'])
         assert scores.shape == (len(test), 21) and np.isfinite(scores).all()
         sources.append(scores)
-        print('Local encoder inference completed:', i + 1, '/', len(folders), flush=True)
+        print('Local encoder scores ready:', i + 1, '/', len(folders), flush=True)
     models = joblib.load(root / 'meta_models.joblib')
     assert len(models) == len(cfg['labels']) == 21
     final = np.column_stack([m.predict_proba(feature_arrays(sources, j, c['feature_mode']))[:, 1]
@@ -226,8 +226,10 @@ def promote(selection_dir, production_dirs, out_dir):
     cfg.update(production_refit=True, sources=sources,
         report_scope='selection_metrics.json measures the pre-refit model only; no held-out score for production',
         meta_refit=False, selection_base_fit_rows=cfg['base_fit_rows'],
-        base_training_rows_per_source=fit_rows, production_heldout_rows=0)
+        base_training_rows_per_source=fit_rows, production_heldout_rows=0,
+        selection_validation_rows=cfg['validation_rows'])
     del cfg['base_fit_rows']
+    del cfg['validation_rows']
     (out / 'config.json').write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
     shutil.copyfile(selection / 'meta_models.joblib', out / 'meta_models.joblib')
     shutil.copyfile(selection / 'metrics.json', out / 'selection_metrics.json')

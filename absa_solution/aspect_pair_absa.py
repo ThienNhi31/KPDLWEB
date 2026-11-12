@@ -27,15 +27,16 @@ class PairModel(PhoBERTABSA):
         self.head[-1]=nn.Linear(self.encoder.config.hidden_size,3)
 
 class PairReviews(Reviews):
-    def __init__(self,texts,tokenizer,labels=None,pairs=None,max_length=160,stride=32,queries=None):
+    def __init__(self,texts,tokenizer,labels=None,pairs=None,max_length=160,stride=32,queries=None,segment=True):
         texts=list(texts)
         if pairs is None:pairs=[(i,a) for i in range(len(texts)) for a in range(7)]
         self.pairs=pairs;self.items=[]
         descriptions=QUERIES if queries is None else queries
         assert len(descriptions)==7
-        queries=[tokenizer.encode(ViTokenizer.tokenize(q),add_special_tokens=False) for q in descriptions]
+        prepare=lambda s:ViTokenizer.tokenize(clean(s)) if segment else clean(s)
+        queries=[tokenizer.encode(prepare(q),add_special_tokens=False) for q in descriptions]
         needed={i for i,_ in pairs}
-        encoded={i:tokenizer.encode(ViTokenizer.tokenize(clean(texts[i])),add_special_tokens=False) for i in needed}
+        encoded={i:tokenizer.encode(prepare(texts[i]),add_special_tokens=False) for i in needed}
         for i,a in pairs:
             query=queries[a];ids=encoded[i]
             capacity=max_length-tokenizer.num_special_tokens_to_add(pair=True)-len(query)
