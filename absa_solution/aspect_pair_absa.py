@@ -27,11 +27,13 @@ class PairModel(PhoBERTABSA):
         self.head[-1]=nn.Linear(self.encoder.config.hidden_size,3)
 
 class PairReviews(Reviews):
-    def __init__(self,texts,tokenizer,labels=None,pairs=None,max_length=160,stride=32):
+    def __init__(self,texts,tokenizer,labels=None,pairs=None,max_length=160,stride=32,queries=None):
         texts=list(texts)
         if pairs is None:pairs=[(i,a) for i in range(len(texts)) for a in range(7)]
         self.pairs=pairs;self.items=[]
-        queries=[tokenizer.encode(ViTokenizer.tokenize(q),add_special_tokens=False) for q in QUERIES]
+        descriptions=QUERIES if queries is None else queries
+        assert len(descriptions)==7
+        queries=[tokenizer.encode(ViTokenizer.tokenize(q),add_special_tokens=False) for q in descriptions]
         needed={i for i,_ in pairs}
         encoded={i:tokenizer.encode(ViTokenizer.tokenize(clean(texts[i])),add_special_tokens=False) for i in needed}
         for i,a in pairs:
@@ -71,10 +73,10 @@ def run(a):
     ranges=[np.arange(nfit),np.arange(nfit,nfit+ntune),np.arange(nfit+ntune,len(pairs))]
     pair_y=np.array([y[i,k*3:k*3+3] for i,k in pairs])
     print('Original split:',len(fi),len(tu),len(va),'pair counts:',nfit,ntune,nval,flush=True)
-    tok=AutoTokenizer.from_pretrained(MODEL,revision=REVISION,use_fast=False)
-    model=PairModel(unfreeze_layers=a.layers)
+    tok=AutoTokenizer.from_pretrained(a.model_name,revision=a.revision,use_fast=False)
+    model=PairModel(a.model_name,a.revision,a.layers)
     depth=len(model.encoder.encoder.layer)-a.layers
-    key={'architecture':'aspect_pair','queries':QUERIES,'model':MODEL,'revision':REVISION,
+    key={'architecture':'aspect_pair','queries':QUERIES,'model':a.model_name,'revision':a.revision,
          'frozen_depth':depth,'max_length':a.max_length,'stride':a.stride,'seed':a.seed,
          'negatives':a.negatives,'train_sha256':hashlib.sha256((Path(a.data_dir)/'train.csv').read_bytes()).hexdigest()}
     cp=Path(a.cache);cp.parent.mkdir(parents=True,exist_ok=True)
@@ -127,7 +129,7 @@ def run(a):
     (out/'metrics.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
     gt.to_csv(out/'validation_truth.csv',index=False);pred.to_csv(out/'validation_prediction.csv',index=False)
     np.savez_compressed(out/'validation_scores.npz',scores=scores,ids=train.id.iloc[va].to_numpy(dtype=str))
-    config={'architecture':'aspect_pair','model_name':MODEL,'revision':REVISION,'unfreeze_layers':a.layers,
+    config={'architecture':'aspect_pair','model_name':a.model_name,'revision':a.revision,'unfreeze_layers':a.layers,
             'seed':a.seed,'max_length':a.max_length,'stride':a.stride,'thresholds':cuts.tolist(),
             'columns':scorer.COLS,'queries':QUERIES,'best_epoch':best_epoch,'production_refit':False,
             'segment':True,'tokenizer_fast':False,'training':vars(a)}
@@ -149,8 +151,9 @@ def main():
     p.add_argument('--lr',type=float,default=3e-5);p.add_argument('--max-length',type=int,default=160)
     p.add_argument('--stride',type=int,default=32);p.add_argument('--seed',type=int,default=2026)
     p.add_argument('--negatives',type=int,default=2)
+    p.add_argument('--model-name',default=MODEL);p.add_argument('--revision',default=REVISION)
     a=p.parse_args()
-    if not 1<=a.layers<=12 or not 0<=a.negatives<=7:p.error('Invalid layers or negatives')
+    if not 1<=a.layers<=24 or not 0<=a.negatives<=7:p.error('Invalid layers or negatives')
     run(a)
 
 if __name__=='__main__':main()

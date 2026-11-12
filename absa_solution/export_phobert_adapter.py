@@ -11,6 +11,9 @@ import numpy as np
 import score_absa
 
 def construct_model(cfg):
+    if cfg.get('architecture')=='label_attention':
+        from label_attention_absa import LabelAttentionModel
+        return LabelAttentionModel(cfg['model_name'],cfg['revision'],cfg['unfreeze_layers'])
     if cfg.get('architecture')=='aspect_pair':
         from aspect_pair_absa import PairModel
         return PairModel(cfg['model_name'],cfg['revision'],cfg['unfreeze_layers'])
@@ -41,7 +44,7 @@ def export(folder,out,include_submission=False):
     torch.save(adapter,out/'adapter.pt')
     shutil.copyfile(folder/'config.json',out/'config.json')
     shutil.copytree(folder/'tokenizer',out/'tokenizer',dirs_exist_ok=True)
-    files=['metrics.json','history.csv','run_info.json','tune_scores.npz','validation_scores.npz']
+    files=['metrics.json','selection_metrics.json','history.csv','run_info.json','tune_scores.npz','validation_scores.npz']
     if include_submission:files.append('submission.csv')
     for name in files:
         if (folder/name).exists():shutil.copyfile(folder/name,out/name)
@@ -58,7 +61,7 @@ def predict(folder,test_path,out,batch_size,threads):
     paired=cfg.get('architecture')=='aspect_pair'
     if paired:
         from aspect_pair_absa import PairReviews
-        ds=PairReviews(test.text,tokenizer,max_length=cfg['max_length'],stride=cfg['stride'])
+        ds=PairReviews(test.text,tokenizer,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'))
     else:
         ds=Reviews(test.text,tokenizer,None,cfg['max_length'],cfg['stride'],cfg.get('segment',True))
     probs=infer(model,loader(ds,tokenizer,batch_size),device)

@@ -1,7 +1,9 @@
 # Phân loại theo cặp khía cạnh – đánh giá
 
-Đây là hướng thử nghiệm mới, chưa có điểm F1 hoàn tất tại thời điểm viết.
-Mục tiêu 0,90 chưa được xác nhận.
+Mô hình base đã hoàn tất: ABSA-F1 validation **0,8666**, CI95%
+**[0,8522; 0,8795]**, checkpoint epoch 4 được chọn bằng tuning F1 0,8733.
+Lượt chạy CPU mất 4.956 giây, gồm cả cache và đánh giá. Điểm công khai chưa có.
+Mục tiêu mới 0,96 chưa được xác nhận.
 
 Mô hình joint trước dùng một vector CLS chung để dự đoán 21 nhãn. Phương pháp
 này đưa tên khía cạnh vào encoder cùng đánh giá, và dùng chung head ba nhãn

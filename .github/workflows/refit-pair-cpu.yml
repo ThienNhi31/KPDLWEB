@@ -1,0 +1,101 @@
+name: Aspect pair refit on outer training partition
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/refit-pair-cpu.yml
+      - absa_solution/launch_pair_refit.txt
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: absa-pair-refit-cpu
+  cancel-in-progress: true
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      HF_HOME: /tmp/absa-hf-cache
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '4'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: 'absa_solution/requirements*.txt'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r absa_solution/requirements_phobert.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: aspect-pair-cpu-model-only
+          run-id: 43066031465
+          github-token: ${{ github.token }}
+          path: absa_solution/initial_pair_model
+      - name: Check source model artifact and code
+        working-directory: absa_solution
+        run: |
+          python -m py_compile refit_pair_absa.py aspect_pair_absa.py export_phobert_adapter.py
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('initial_pair_model')
+          assert not list(p.rglob('submission.csv'))
+          c=json.loads((p/'config.json').read_text())
+          assert c['architecture']=='aspect_pair' and not c['production_refit']
+          assert (p/'adapter.pt').exists()
+          print('Source is the selected supervised model, with no blind predictions.')
+          PY
+      - name: Refit on 3750 original reviews with fixed two-epoch schedule
+        working-directory: absa_solution
+        run: |
+          python -u refit_pair_absa.py --data-dir .. --init-dir initial_pair_model --out-dir refit_pair_results --cache private_cache/refit_pair.pt --scope outer80 --epochs 2 --threads 4 --batch-size 16 --accumulation 1 --lr 0.00001 --negatives 2
+      - name: Export model only
+        working-directory: absa_solution
+        run: |
+          python export_phobert_adapter.py export --model-dir refit_pair_results --adapter-dir refit_pair_adapter
+      - name: Add validation summary
+        if: always()
+        working-directory: absa_solution
+        run: |
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          p=Path('refit_pair_results/metrics.json')
+          text='# Fixed-schedule refit on 80% of original reviews\n\n'
+          if p.exists():
+              r=json.loads(p.read_text())
+              text+=f"Validation ABSA-F1: **{r['ABSA_F1']:.4f}**\n\nCI95%: {r['ABSA_F1_CI95']}\n\nTarget 0.96 reached: {r['ABSA_F1'] >= .96}\n"
+          else:text+='No completed validation report.\n'
+          text+='\nThresholds stay fixed from the original model. The original 938 validation reviews remain excluded. No blind test is read.\n'
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: refit-pair-cpu-model-only
+          path: absa_solution/refit_pair_adapter/
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: refit-pair-aggregate-progress
+          path: |
+            absa_solution/refit_pair_results/history.csv
+            absa_solution/refit_pair_results/metrics.json
+            absa_solution/refit_pair_results/run_info.json
+            absa_solution/refit_pair_results/config.json
+            absa_solution/refit_pair_results/validation_scores.npz
+          if-no-files-found: ignore
+          retention-days: 7

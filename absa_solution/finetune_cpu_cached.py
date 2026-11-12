@@ -149,6 +149,14 @@ def run(a):
         torch.testing.assert_close(full,fast,atol=2e-5,rtol=2e-5)
         print('Cached/full logits parity passed; max error:',float((full-fast).abs().max()),flush=True)
     if a.init_dir:
+        init_config=json.loads((Path(a.init_dir)/'config.json').read_text())
+        assert not init_config.get('production_refit',False), 'Cannot use an all-train production checkpoint for held-out evaluation'
+        assert init_config['seed']==a.seed, 'Warm-start split seed must match the original split'
+        init_info_path=Path(a.init_dir)/'run_info.json'
+        if init_info_path.exists():
+            init_info=json.loads(init_info_path.read_text())
+            init_hash=init_info.get('cache_key',{}).get('train_sha256',init_info.get('train_sha256'))
+            assert init_hash in (None,key['train_sha256']), 'Warm-start training data differs'
         initial=torch.load(Path(a.init_dir)/'model.pt',map_location='cpu',weights_only=True)
         base_state=model.state_dict()
         frozen={n for n,p in model.named_parameters() if not p.requires_grad}
