@@ -58,12 +58,14 @@ def predict(folder,test_path,out,batch_size,threads):
     tokenizer=AutoTokenizer.from_pretrained(Path(folder)/'tokenizer',use_fast=cfg.get('tokenizer_fast',False))
     test=pd.read_csv(test_path)
     assert list(test.columns)==['id','text'] and test.id.is_unique and not test.isna().any().any()
+    from text_normalization import prepare_texts
+    texts=prepare_texts(cfg,test.text)
     paired=cfg.get('architecture')=='aspect_pair'
     if paired:
         from aspect_pair_absa import PairReviews
-        ds=PairReviews(test.text,tokenizer,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'),segment=cfg.get('segment',True))
+        ds=PairReviews(texts,tokenizer,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'),segment=cfg.get('segment',True))
     else:
-        ds=Reviews(test.text,tokenizer,None,cfg['max_length'],cfg['stride'],cfg.get('segment',True))
+        ds=Reviews(texts,tokenizer,None,cfg['max_length'],cfg['stride'],cfg.get('segment',True))
     probs=infer(model,loader(ds,tokenizer,batch_size),device)
     if paired:probs=probs.reshape(len(test),21)
     to_frame(test.id,predictions(probs,np.asarray(cfg['thresholds']))).to_csv(out,index=False)

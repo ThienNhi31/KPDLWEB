@@ -22,6 +22,8 @@ def open_model(folder,threads=2):
     return cfg,model,tok
 
 def probabilities_for(cfg,model,tok,texts,batch_size=8):
+    from text_normalization import prepare_texts
+    texts=prepare_texts(cfg,texts)
     if cfg.get('architecture')=='aspect_pair':
         from aspect_pair_absa import PairReviews
         ds=PairReviews(texts,tok,max_length=cfg['max_length'],stride=cfg['stride'],queries=cfg.get('queries'),segment=cfg.get('segment',True))

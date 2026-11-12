@@ -17,6 +17,7 @@ from phobert_absa import (seed_everything, cpu_thread_limit, split_indices, Revi
     optimizer_for, tune_thresholds, predictions, main_score, to_frame, MODEL, REVISION)
 from stacked_absa import file_hash, model_identity
 from generate_training_augmentation import normalize
+from text_normalization import NORMALIZER_ID,SIGNATURE,prepare_texts
 import score_absa as scorer
 
 
@@ -53,7 +54,10 @@ def run(a):
     seed_everything(cfg['seed'])
     torch.set_num_threads(cpu_thread_limit(a.threads))
     train_path = Path(a.data_dir)/'train.csv'
-    train, extra = pd.read_csv(train_path), pd.read_csv(a.augmentation)
+    train=pd.read_csv(train_path)
+    extra=pd.read_csv(a.augmentation) if a.augmentation else pd.DataFrame(columns=train.columns)
+    normalizer=a.text_normalizer or cfg.get('text_normalizer')
+    input_cfg={'text_normalizer':normalizer,'text_normalizer_sha256':SIGNATURE if normalizer else None}
     assert list(train.columns) == list(extra.columns) == ['id','text']+scorer.COLS
     assert not train.isna().any().any() and not extra.isna().any().any()
     assert train.id.is_unique and extra.id.is_unique and not set(train.id) & set(extra.id)
@@ -84,21 +88,30 @@ def run(a):
     depth = 12-cfg['unfreeze_layers']
     key = {'model':MODEL,'revision':REVISION,'frozen_depth':depth,'max_length':cfg['max_length'],
         'stride':cfg['stride'],'train_sha256':train_hash}
-    saved = torch.load(a.cache, map_location='cpu', weights_only=True)
-    assert saved['key'] == key
-    cache = saved['cache']
-    del saved
+    if normalizer:key.update(input_cfg)
+    original_cache=Path(a.cache);original_cache.parent.mkdir(parents=True,exist_ok=True)
+    if original_cache.exists():
+        saved = torch.load(original_cache,map_location='cpu',weights_only=True)
+        assert saved['key']==key
+        cache=saved['cache'];del saved
+    else:
+        ds=Reviews(prepare_texts(input_cfg,train.text),tok,train[scorer.COLS].to_numpy(int),cfg['max_length'],cfg['stride'])
+        cache=make_cache(model,ds,tok,depth,a.batch_size)
+        torch.save({'key':key,'cache':cache},original_cache)
+        del ds
     assert len(cache) == len(train)
-    syn_key = {**key, 'augmentation_sha256':file_hash(a.augmentation)}
+    augmentation_hash=file_hash(a.augmentation) if a.augmentation else None
+    syn_key = {**key, 'augmentation_sha256':augmentation_hash}
     syn_cache_path = Path(a.synthetic_cache)
     syn_cache_path.parent.mkdir(parents=True, exist_ok=True)
-    if syn_cache_path.exists():
+    if not len(extra):synthetic_cache=[]
+    elif syn_cache_path.exists():
         saved = torch.load(syn_cache_path, map_location='cpu', weights_only=True)
         assert saved['key'] == syn_key
         synthetic_cache = saved['cache']
         del saved
     else:
-        ds = Reviews(extra.text, tok, extra[scorer.COLS].to_numpy(int), cfg['max_length'], cfg['stride'])
+        ds = Reviews(prepare_texts(input_cfg,extra.text), tok, extra[scorer.COLS].to_numpy(int), cfg['max_length'], cfg['stride'])
         synthetic_cache = make_cache(model, ds, tok, depth, a.batch_size)
         torch.save({'key':syn_key,'cache':synthetic_cache}, syn_cache_path)
         del ds
@@ -160,16 +173,16 @@ def run(a):
     (out/'metrics.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
     np.savez_compressed(out/'validation_scores.npz',scores=scores,ids=train.id.iloc[va].to_numpy(dtype=str))
     old_report = json.loads((src/'metrics.json').read_text())
-    pd.DataFrame([{'method':'without synthetic augmentation','tune_F1':source_tune_f1,'validation_F1':old_report['ABSA_F1']},
-        {'method':'with weighted synthetic augmentation','tune_F1':best,'validation_F1':report['ABSA_F1']}]).to_csv(out/'augmentation_ablation.csv',index=False)
+    pd.DataFrame([{'method':'source model before this trial','tune_F1':info['best_tune_F1'],'validation_F1':old_report['ABSA_F1']},
+        {'method':'trial preprocessing and supervised refinement','tune_F1':best,'validation_F1':report['ABSA_F1']}]).to_csv(out/'augmentation_ablation.csv',index=False)
     cfg.update(thresholds=cuts.tolist(),best_epoch=best_epoch,training=vars(a),
         production_refit=False,augmentation_rows=len(extra),synthetic_weight=a.synthetic_weight,
-        augmentation_sha256=file_hash(a.augmentation),source_identity=model_identity(src),
+        augmentation_sha256=augmentation_hash,source_identity=model_identity(src),**input_cfg,
         augmentation_updates_in_selected_checkpoint=best_epoch>0)
     (out/'config.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2))
     torch.save({n:t for n,t in model.state_dict().items() if n in trainable},out/'adapter.pt')
     tok.save_pretrained(out/'tokenizer')
-    result = {'cache_key':key,'train_sha256':train_hash,'augmentation_sha256':file_hash(a.augmentation),
+    result = {'cache_key':key,'train_sha256':train_hash,'augmentation_sha256':augmentation_hash,
         'authentic_fit_rows':len(fi),'synthetic_rows':len(extra),'synthetic_weight':a.synthetic_weight,
         'tune_rows':len(tu),'validation_rows':len(va),'best_tune_F1':best,'best_epoch':best_epoch,
         'validation_F1':report['ABSA_F1'],'total_seconds':time.perf_counter()-started,
@@ -183,7 +196,8 @@ def main():
     p=argparse.ArgumentParser()
     p.add_argument('--data-dir',default='..')
     p.add_argument('--init-dir',required=True)
-    p.add_argument('--augmentation',required=True)
+    p.add_argument('--augmentation')
+    p.add_argument('--text-normalizer',choices=[NORMALIZER_ID])
     p.add_argument('--out-dir',default='augmentation_results')
     p.add_argument('--cache',default='private_cache/phobert_frozen8_160.pt')
     p.add_argument('--synthetic-cache',default='private_cache/synthetic_phi.pt')

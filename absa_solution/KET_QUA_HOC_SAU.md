@@ -24,6 +24,21 @@ Cùng split review 2.812 fit /938 tuning /938 validation, seed2026. Chọn epoch
 | Stacking 4 encoder, meta 5-fold trên tuning | 0.8807 | [0.8655; 0.8938] |
 | PhoBERT label-specific token attention | 0.8659 | [0.8507; 0.8791] |
 | Stacking thêm token-attention, 5 encoder | 0.8804 | [0.8657; 0.8937] |
+| Token-attention + 1.400 mẫu train tổng hợp trọng số 0,4 | 0.8684 | [0.8534; 0.8810] |
+| Stacking thêm encoder đã học mẫu tổng hợp | 0.8804 | [0.8651; 0.8934] |
+| Token-attention + chuẩn hóa viết tắt, không thêm mẫu | 0.8701 | [0.8551; 0.8846] |
+| Stacking 5 encoder có chuẩn hóa viết tắt | 0.8826 | [0.8685; 0.8960] |
+
+Bản chuẩn hóa dùng đúng split gốc; số review trùng sau chuẩn hóa giữa từng cặp
+fit/tuning/validation đều bằng 0. Meta OOF tuning 0,892538, validation 0,882568.
+File đã tạo có SHA256 e38970af7b0519f21a41c0b07fd8cb545f0e86bc71730ee331168ce21d02db02,
+chưa có điểm công khai. Bộ 0,8840 công khai vẫn được giữ riêng.
+
+Refit aspect-pair dùng 3.750 review thật, lịch hai epoch cố định, ngưỡng giữ từ
+lựa chọn cũ: validation 0,867488, CI95% [0,853582; 0,879729]. Thay duy nhất encoder
+cặp trong bộ kết hợp, giữ nguyên meta/ngưỡng: validation 0,882001, CI95%
+[0,867786; 0,894539]. Các encoder và meta vẫn chưa học 938 review validation ở
+phép đo này. Đây là biến thể khác, chưa có điểm công khai và chưa thay file 0,8840.
 
 Trọng số trộn xác suất chọn theo từng khía cạnh bằng tuning. Stacking dùng dự
 đoán của 4 mô hình fit trên 2.812 review; meta logistic học trên 938 review tuning,
@@ -34,13 +49,18 @@ Không coi số tầng lớn hơn là bằng chứng điểm tốt hơn.
 
 Token-attention chọn epoch 5, tuning F1 0,8703. Khi thêm vào stacking, meta OOF
 tuning giảm từ 0,892105 xuống 0,891557; validation giảm từ 0,880738 xuống 0,880376.
-Giữ bộ 4 encoder. Đang thử refit aspect-pair trên 80% review gốc với lịch/ngưỡng
-cố định, PhoBERT-large 24 tầng giữ cố định 20 tầng đầu và mDeBERTa dùng tokenizer
-native, cùng shared head khía cạnh. Chưa có kết quả hoàn tất cho các lượt này;
-không ghi điểm dự kiến thành điểm đo.
+Giữ bộ 4 encoder cho file đã chấm. Refit aspect-pair 80% đã có số đo riêng ở trên.
+Đang thử chuẩn hóa viết tắt, PhoBERT-large 24 tầng giữ cố định 20 tầng đầu và
+mDeBERTa dùng tokenizer native (gồm cả khởi tạo từ mô hình NLI), cùng shared head
+khía cạnh. Chưa có kết quả hoàn tất cho các lượt này; không ghi điểm dự kiến
+thành điểm đo.
 
 Bản loss cân bằng warm-start từ checkpoint tốt nhất của bản 4 tầng cuối, rồi tinh chỉnh thêm 4 epoch. Head phụ nhắc được giảm trọng số; loss dương/âm cân theo từng nhãn. Chọn checkpoint/threshold vẫn trên tuning.
 
-Tất cả mô hình học từ train có nhãn. Không thêm đánh giá/nhãn tổng hợp. Không đưa văn bản test vào LLM/API và không gán nhãn test thủ công. Validation đã được dùng làm phản hồi phát triển ở mức tổng hợp nên không phải phép xác nhận hoàn toàn độc lập.
+Các model trong bộ chính học từ train có nhãn, không dùng review tổng hợp.
+Thử nghiệm 1.400 mẫu bổ sung do trợ lý soạn được báo cáo riêng, chưa chọn vào bộ
+chính; xem THU_NGHIEM_DU_LIEU_THEM.md. Không đưa văn bản test vào LLM/API và không
+gán nhãn test thủ công. Validation đã được dùng làm phản hồi phát triển ở mức
+tổng hợp nên không phải phép xác nhận hoàn toàn độc lập.
 
 Export model mặc định không kèm submission.csv. Việc công bố dự đoán trên test là thao tác riêng, không phải đăng mã nguồn.

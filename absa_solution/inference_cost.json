@@ -1,0 +1,8 @@
+{
+  "cold_prediction_seconds": 952.497788977,
+  "cpu_threads": 2,
+  "reviews": 732,
+  "encoders": 4,
+  "concurrent_training": true,
+  "submission_sha256": "6b0bd799cb3270ce87d3f2cbc6828fc50a08b261299b1dd0ceacc76db8af735d"
+}

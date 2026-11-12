@@ -1,101 +1,51 @@
-# Hướng dẫn tái lập ABSA
+# Hướng dẫn bản chính: ABSA trên CPU
 
-Python đã dùng: 3.12.14. Mô hình chạy CPU, không cần CUDA. Seed: 2026.
+File đã được người dùng chấm có **ABSA-F1 công khai 0,8840**. Mục tiêu 0,96 chưa đạt. Notebook chính tái lập bộ stacking 4 encoder, validation **0,880738** trên 938 review, CI95% **[0,865538; 0,893802]**. Các biến thể đang thử được báo cáo riêng trong KET_QUA_HOC_SAU.md; không gán điểm public cũ cho file từ mô hình khác.
 
-## Chuẩn bị
+SHA256 của file đã gửi trước ảnh chấm:
 
-Giải nén vào thư mục riêng. Đặt các tệp giảng viên cung cấp vào `data/`:
-`train.csv`, `test_blind.csv`, `submission_demo.csv`. `score_absa.py` đi kèm
-là mã chấm gốc, không sửa. Không đính kèm dữ liệu gốc trong gói bài nộp.
-Phiên bản dữ liệu tham chiếu: repository ThienNhi31/KPDLWEB, commit
-`7c052a71010eac9361ea8803b9e8bdd6cfc99be8`; SHA-256 trong `results/run_info.json`.
+`6b0bd799cb3270ce87d3f2cbc6828fc50a08b261299b1dd0ceacc76db8af735d`
+
+public_score_report.json ghi nguồn là ảnh người dùng cung cấp. Ảnh không hiển thị hash; việc liên kết phiên bản dựa trên phản hồi trong hội thoại. Điểm private 512 mẫu chưa có. Accuracy 0,967 trên ảnh không thay cho ABSA-F1.
+
+## File và môi trường
+
+Python 3.12.14 tại cloud, 3.12.16 trên runner GitHub. CPU, không dùng GPU/CUDA. Cài trước bản PyTorch CPU rồi các requirements có phiên bản đã ghim:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -r requirements.txt
 ```
 
-Trên Windows dùng `.venv\Scripts\activate`. Không cần tải mô hình ngoài.
+Đặt train.csv, test_blind.csv và submission_demo.csv ở thư mục cha; source và score_absa.py ở thư mục chứa submission.ipynb. Có thể đặt ABSA_DATA_DIR trỏ tới thư mục dữ liệu khi chạy notebook. Không kèm các CSV gốc trong gói nộp.
 
-## Chạy notebook
+Đặt checkpoint đã chọn vào model_bundle với các thư mục cached_phobert, balanced_phobert, aspect_pair, visobert và stacked. Adapter chỉ bỏ những tensor đã kiểm tra khớp chính xác pretrained base ghim revision. Không cần GPU để nạp. Base weights cần tải lần đầu; cache chúng để dùng offline sau đó.
 
-Mở `submission.ipynb` bằng Jupyter, chọn kernel của môi trường trên và Run All.
-Nếu notebook nằm cùng `pipeline.py`, nó tự đọc `data/` và ghi `results/`.
-Có thể dùng biến môi trường `ABSA_DATA_DIR` để chỉ định vị trí dữ liệu.
-
-Notebook thực sự huấn luyện cả ba mô hình, xuất bảng so sánh và toàn bộ các
-chỉ số, đọc ví dụ lỗi từ validation, huấn luyện lại trên toàn bộ train rồi tạo
-`results/submission.csv`. Không hiển thị văn bản test trong notebook.
-
-Chạy tương đương từ dòng lệnh:
+## Chạy lại file dự đoán
 
 ```bash
-python pipeline.py --data-dir data --out-dir reproduced
-python score_absa.py --kiem-tra reproduced/submission.csv data/test_blind.csv
-python -c "from pathlib import Path; assert Path('results/submission.csv').read_bytes() == Path('reproduced/submission.csv').read_bytes(); print('Exact match')"
+python stacked_absa.py predict --model-dir model_bundle/stacked --test ../test_blind.csv --output submission.csv --threads 2 --batch-size 8
+python score_absa.py --kiem-tra submission.csv ../test_blind.csv
 ```
 
-Ước lượng thời gian: khoảng 1–4 phút trên CPU của môi trường đã chạy; phụ thuộc
-máy. Số đo thực tế và cấu hình phần cứng nằm trong `results/run_info.json`;
-thời gian huấn luyện từng mô hình nằm trong `results/comparison.csv`.
+Notebook submission.ipynb mặc định dùng checkpoint và các xác suất tuning đã lưu từ quá trình train, fit lại meta, báo cáo validation và tạo CSV. Nó kiểm tra hash cấu hình/trọng số, thứ tự model/cột và đối chiếu với file tham chiếu có trước. Đặt RETRAIN_BASES=True để train từ đầu; RECOMPUTE_BASE_VALIDATION=True để chạy forward lại cả tuning/validation. Đọc HUONG_DAN_STACKING.md cho tất cả lệnh train, export adapter và refit. Không ghi thời gian nạp checkpoint thành thời gian train.
 
-## Chỉ chạy suy luận bằng mô hình đã lưu
+Lần suy luận lạnh đã đo: 952,50 giây cho 732 review và 4 encoder trên quota 2 CPU, trong lúc có một job train khác cùng chạy. Đây là số đo cho toàn pipeline, không phải tốc độ riêng của mỗi encoder. inference_cost.json lưu số đo và hash CSV. Tái huấn luyện toàn bộ từ đầu có thể mất 4–8 giờ trên 2 CPU; nên có 16 GB RAM khi train model theo cặp vì cache lớn. Xem lịch sử và run_info cho từng số đo.
 
-```bash
-python predict.py --model results/model.joblib --test data/test_blind.csv --output submission_reproduced.csv
-python -c "from pathlib import Path; assert Path('results/submission.csv').read_bytes() == Path('submission_reproduced.csv').read_bytes(); print('Exact match')"
-```
+Các workflow mới trên GitHub chỉ xuất model và thống kê từ train. Artifact có hạn lưu, cần tải checkpoint về trước khi hết hạn. Bundle tái lập trên GitHub:
 
-Giữ `pipeline.py` cùng thư mục khi nạp `model.joblib` vì mô hình NB-SVM dùng
-lớp `NBSVM` trong module đó. Chỉ nạp file joblib tin cậy.
+https://github.com/ThienNhi31/KPDLWEB/actions/runs/43158772777
 
-## Giao thức đánh giá và giới hạn
+Đối chiếu đúng hash CSV khi dùng một bundle khác; số liệu validation khớp không tự chứng minh file dự đoán trùng. Bundle compact tại cloud đã được chạy suy luận và xác nhận khớp byte với file có hash nêu trên.
 
-Chuẩn hóa Unicode NFC, chữ thường và khoảng trắng; không xóa dấu tiếng Việt,
-phủ định hoặc các placeholder. Các văn bản giống nhau sau chuẩn hóa nằm cùng
-một nhóm. Tách khoảng 60% fit / 20% tuning / 20% validation bằng GroupShuffleSplit.
-Vectorizer, tỷ số NB và trọng số classifier chỉ fit trên tập fit khi so sánh.
-Ngưỡng cho từng nhãn và lựa chọn mô hình dựa trên tuning. Cả ba mô hình dùng
-cùng validation. Chỉ dùng train có nhãn; không sinh thêm dữ liệu.
+## Đánh giá và phân tích
 
-Ban đầu đã xem kết quả hai baseline rồi bổ sung NB-SVM. Vì quá trình phát triển
-đã tham khảo điểm validation ở mức tổng hợp, kết quả validation không nên được
-coi là đánh giá xác nhận hoàn toàn độc lập của một nghiên cứu đã đăng ký trước.
-Không chỉnh ngưỡng theo validation, không dùng điểm leaderboard hay nhãn test.
-Bootstrap 1.000 lần lấy mẫu theo đánh giá, theo đúng hàm của mã chấm; CI này là
-độ bất định lấy mẫu có điều kiện với mô hình cố định, không gồm biến thiên giữa
-các lần huấn luyện hay dịch chuyển phân bố train/test.
+Chia group theo review chuẩn hóa, seed2026: 2.812 fit /938 tuning /938 validation. Encoder chỉ học fit; meta học tuning và chọn tham số/ngưỡng bằng 5-fold out-of-fold. Stacking dùng tổng cộng 3.750 review có đóng góp huấn luyện. So sánh TF-IDF và encoder trên cùng validation; báo cáo F1/P/R/accuracy/kappa/MCC/balanced accuracy, bootstrap 1.000 lần và 5 lỗi train được giữ làm validation.
 
-Sau lựa chọn, fit lại vectorizer và mô hình trên toàn bộ train, giữ các ngưỡng
-đã học từ tuning. Tái fit làm phân bố margin có thể thay đổi; đây là một giới hạn
-của chiến lược ngưỡng này. Không thể suy ra điểm private từ điểm validation.
+Bản nộp riêng giữ đủ output của 5 lỗi. Bản notebook công khai xóa output nguyên văn ở cell này để không công bố review gốc. Validation đã được xem trong các vòng phát triển; CI không tính bất định do chọn mô hình hay dịch chuyển train/test. Không chấm mô hình refit toàn train như thể validation vẫn chưa được học.
 
-`nhac = nhac OR khen OR che` bảo đảm ràng buộc nhãn. Có thể đồng thời khen và
-chê. Nhãn nhắc vẫn được học riêng để giữ các trường hợp trung tính.
+Bộ 4 encoder chính không sử dụng dữ liệu tổng hợp. Thử nghiệm 1.400 mẫu bổ sung được tách riêng, có du_lieu_them.csv, JSON công cụ/đặc tả và ablation; kết quả chưa vượt bộ chính. Xem THU_NGHIEM_DU_LIEU_THEM.md. LLM chỉ hỗ trợ code, phân tích lỗi train và soạn mẫu train bổ sung; không nhận văn bản test hoặc tạo nhãn test.
 
-Đây là lời giải cổ điển có thể tái lập, chưa đạt mốc validation 0,80. Không có
-đáp án test để khẳng định đạt ngưỡng private. Một hướng cải thiện tiếp theo là
-tinh chỉnh mô hình tiếng Việt với cùng nguyên tắc tách dữ liệu và đánh giá trên
-một holdout mới hoặc nested CV; phần đó chưa được huấn luyện trong gói này.
-
-Không dùng LLM/API dự đoán hay gán nhãn test, không gán nhãn thủ công test.
-LLM chỉ hỗ trợ viết mã và diễn giải lỗi từ dữ liệu train. Không có
-`du_lieu_them.csv` vì không sinh dữ liệu huấn luyện bổ sung.
-
-## Sản phẩm
-
-- `submission.ipynb`: notebook đã chạy, giữ output.
-- `pipeline.py`, `predict.py`, `score_absa.py`: mã nguồn.
-- `requirements.txt`: phiên bản thư viện.
-- `BAO_CAO.md`: kết quả thực nghiệm và phân tích lỗi.
-- `results/submission.csv`: dự đoán từ mô hình tự huấn luyện, 732 dòng, 22 cột.
-- `results/model.joblib`: vectorizer, mô hình, ngưỡng.
-- `results/comparison.csv`, `metrics.json`: chỉ số và CI.
-- `results/validation_*.csv`, `validation_truth.csv`: nhãn để đối chiếu, không có text.
-- `results/validation_errors.json`: ví dụ lỗi từ train, không phải test.
-- `results/split.csv`, `label_counts.csv`, `thresholds.json`, `run_info.json`: tái lập.
-
-Không có kết quả chấm công khai trong phiên này, nên chưa thể xác nhận đây là
-file có điểm công khai cao nhất. Nếu nộp nhiều lần, lưu đúng file tốt nhất theo
-trang chấm và cập nhật gói bài tương ứng. Đổi tên ZIP theo mã nhóm trước khi nộp.
+Bản TF-IDF cũ: HUONG_DAN_CO_DIEN.md. Các file .zip cũ chỉ là phiên bản lịch sử; file nộp cuối phải khớp đúng mô hình và CSV có điểm công khai tốt nhất đã xác nhận.

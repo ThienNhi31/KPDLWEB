@@ -30,7 +30,12 @@ python generate_training_augmentation.py --train ../train.csv --output augmentat
 python augment_cached_absa.py --data-dir .. --init-dir label_attention_results --augmentation augmentation_trial/du_lieu_them.csv --out-dir augmentation_results --cache private_cache/phobert_frozen8_160.pt --synthetic-cache private_cache/synthetic_phi_79dc.pt --synthetic-weight 0.4 --epochs 4 --patience 2 --threads 2 --batch-size 8 --accumulation 2 --lr 0.00001
 ```
 
-Kết quả cuối chưa có tại thời điểm viết. Nếu chọn mô hình này cho bản nộp, phải
+Kết quả đã đo: mô hình đơn từ validation 0,865875 tăng lên 0,868441,
+CI95% [0,853413; 0,880977], chọn epoch 3 bằng tuning F1 0,875941.
+Khi thêm vào stacking, validation 0,880435 và meta OOF tuning 0,891934, đều chưa
+vượt bộ 4 encoder (0,880738 và 0,892105). Không chọn augmentation vào bộ chính.
+
+Nếu chọn mô hình này cho bản nộp, phải
 đưa du_lieu_them.csv và JSON đặc tả vào gói nộp, ghi công cụ/đặc tả trong notebook,
 báo cáo ablation cùng thời gian/hardware. Không tự đưa CSV bổ sung hoặc dự đoán
 test lên GitHub. Model chỉ lưu các tham số đã học; cache original train giữ riêng.
