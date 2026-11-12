@@ -1,0 +1,122 @@
+{
+  "updated_utc": "2026-11-12T12:16:45.470411+00:00",
+  "mode": "train_only",
+  "blind_file_use_allowed": false,
+  "raw_input": "train.csv",
+  "split": {
+    "fit": 2812,
+    "tune": 938,
+    "validation": 938
+  },
+  "normalized_duplicate_text_rows": 0,
+  "cross_split_text_overlap": 0,
+  "target_F1": 0.96,
+  "target_reached": false,
+  "public_score_claimed": false,
+  "validation_feedback_seen_in_prior_development": true,
+  "results": [
+    {
+      "method": "four_encoder",
+      "validation_F1": 0.8807380536736993,
+      "CI95": [
+        0.8655377220188366,
+        0.8938021691510577
+      ],
+      "model_dir": "model_bundle/stacked"
+    },
+    {
+      "method": "five_encoder",
+      "validation_F1": 0.8825676288963341,
+      "CI95": [
+        0.8684753392217827,
+        0.8959541434153339
+      ],
+      "model_dir": "stacked_normalized_results"
+    },
+    {
+      "method": "outer80_fixed_meta",
+      "validation_F1": 0.8842455443513071,
+      "CI95": [
+        0.8699751578998941,
+        0.8975907676628353
+      ],
+      "model_dir": "stacked_outer80_results"
+    },
+    {
+      "method": "bootstrap_cutoffs",
+      "validation_F1": 0.8827553444319866,
+      "CI95": [
+        0.8687490850847014,
+        0.8962560865217272
+      ],
+      "model_dir": "stacked_bootstrap_thresholds_results"
+    },
+    {
+      "method": "boosted_tree_meta",
+      "validation_F1": 0.8721162212914821,
+      "CI95": [
+        0.8571629785857665,
+        0.8854901366857065
+      ],
+      "model_dir": "stacked_nonlinear_results"
+    },
+    {
+      "method": "eight_encoders",
+      "validation_F1": 0.8739937428388403,
+      "CI95": [
+        0.8603168688394575,
+        0.8870753249681732
+      ],
+      "model_dir": "stacked_eight_train_only_results"
+    },
+    {
+      "method": "sparse_global_meta",
+      "validation_F1": 0.8782254396715878,
+      "CI95": [
+        0.8631767225972169,
+        0.891068055868929
+      ],
+      "model_dir": "stacked_sparse_train_only_results"
+    },
+    {
+      "method": "large_pair",
+      "validation_F1": 0.8641188557664332,
+      "CI95": [
+        0.8487892448541555,
+        0.8785147900743522
+      ],
+      "model_dir": "large_pair_adapter"
+    },
+    {
+      "method": "native_pair",
+      "validation_F1": 0.8434165005556471,
+      "CI95": [
+        0.8286668434463115,
+        0.8568195743554767
+      ],
+      "model_dir": "native_pair_adapter"
+    },
+    {
+      "method": "nli_pair",
+      "validation_F1": 0.8165778292920379,
+      "CI95": [
+        0.8020592762949108,
+        0.8302439271369924
+      ],
+      "model_dir": "nli_pair_adapter"
+    },
+    {
+      "method": "deeper_attention",
+      "validation_F1": 0.8700754471200474,
+      "CI95": [
+        0.8551173352164004,
+        0.8845530222376603
+      ],
+      "model_dir": "deeper_attention_results"
+    }
+  ],
+  "running": [
+    "ViSoBERT outer80 local refit",
+    "pretrained NLI classifier head on GitHub"
+  ]
+}
