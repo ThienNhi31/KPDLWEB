@@ -20,6 +20,8 @@ xem trong quá trình phát triển, không phải một holdout xác nhận m�
 | Encoder toàn văn thứ nhất học thêm trên outer80 | 0,856092 | Chưa có |
 | Encoder toàn văn cân bằng loss học thêm trên outer80 | 0,860196 | Chưa có |
 | Năm encoder, ba encoder được refit outer80, meta giữ nguyên | 0,884246 | Không chấm blind trong chế độ hiện tại |
+| ViSoBERT học thêm hai epoch trên outer80 | 0,839635 | Không chấm blind trong chế độ hiện tại |
+| Năm encoder, refit thêm ViSoBERT, meta và ngưỡng giữ nguyên | 0,885296 | Không chấm blind trong chế độ hiện tại |
 | PhoBERT-large theo từng khía cạnh | 0,864119 | Không chấm blind trong chế độ hiện tại |
 | mDeBERTa theo từng khía cạnh | 0,843417 | Không chấm blind trong chế độ hiện tại |
 | Encoder khởi tạo từ NLI, head khía cạnh mới | 0,816578 | Không chấm blind trong chế độ hiện tại |
@@ -50,7 +52,10 @@ checkpoint được chọn vẫn cho validation **0,870075**, giống mô hình 
 Không tính các epoch không được chọn như một cải thiện.
 
 Các encoder PhoBERT-large và mDeBERTa đã hoàn tất trên CPU; điểm thực tế có trong
-bảng trên. Lượt giữ nguyên head phân loại NLI pretrained đang chạy riêng.
+bảng trên. Lượt giữ nguyên head NLI pretrained bị hủy sau khoảng 330 phút.
+Epoch 1 chỉ ghi nhận tuning F1 0,767449; chưa có validation và không có gói
+trọng số hoàn chỉnh. Không dùng con số tuning này làm điểm validation hay
+đưa lượt chưa hoàn tất vào mô hình được chọn.
 Dạng NLI ở đây là bộ phân loại xác suất cục bộ, được fine-tune bằng
 nhãn train; không sinh văn bản và không gọi LLM/API để gán nhãn test.
 

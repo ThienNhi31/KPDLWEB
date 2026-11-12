@@ -15,6 +15,8 @@ python -m pip install -r requirements.txt
 ```
 
 Giữ `train.csv` gốc ở một thư mục riêng. Gói mô hình không chứa dữ liệu gốc.
+Có thể mở `train_only.ipynb`; đặt biến môi trường `ABSA_TRAIN_CSV` nếu file
+train nằm ngoài thư mục gói hoặc thư mục cha. Notebook bật bộ chặn ở ô đầu.
 
 ## Đánh giá lại trên train
 
@@ -37,6 +39,9 @@ python train_only.py evaluate_train_only.py --model-dir models/stacked --train /
 Lần chạy đầu cần tải các backbone pretrained công khai, đúng phiên bản được
 ghim trong cấu hình. Tệp adapter chứa các tham số đã học. RAM dùng tuần tự từng
 encoder; chạy trên CPU được, nhưng chậm hơn việc đọc đầu ra validation đã lưu.
+Đã kiểm tra thực tế năm encoder trên 938 mẫu validation: 752,67 giây với hai
+luồng CPU, không GPU. ABSA-F1 là 0,8852956; CSV dự đoán validation trùng từng
+byte với bản tính từ đầu ra đã lưu. Xem `fresh_validation_proof.json`.
 
 Kết quả gồm metrics, dự đoán trên validation và năm ví dụ sai lấy từ train.
 Những ví dụ này dành cho báo cáo riêng; không đưa nội dung đánh giá gốc lên

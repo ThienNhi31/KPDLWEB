@@ -1,0 +1,22 @@
+{
+  "ABSA_F1": 0.8852956070394071,
+  "CI95": [
+    0.8714412111384721,
+    0.8983558783466916
+  ],
+  "validation_rows": 938,
+  "input_file": "train.csv",
+  "blind_file_read": false,
+  "mode": "fresh local encoder inference on train validation",
+  "seconds": 752.6673013550026,
+  "validation_feedback_seen_in_prior_development": true,
+  "public_score_claimed": false,
+  "validation_prediction_sha256": "31a4c487c81d71c572895cc95c2c8e7d0e32e4651684f08e631a80e0a31cd91a",
+  "fresh_and_saved_output_predictions_byte_identical": true,
+  "torch": "2.6.0+cpu",
+  "threads": 2,
+  "gpu": false,
+  "allocated_ram_gib": 8,
+  "portable_package_layout_verified": true,
+  "zip_crc_checked": true
+}

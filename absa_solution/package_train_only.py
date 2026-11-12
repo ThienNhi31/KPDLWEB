@@ -24,10 +24,17 @@ def pack(model_dir,solution_root,review_dir,output):
         if file.name!='package_best_submission.py':add(file,file.name)
     for file in sorted(root.glob('requirements*.txt')):add(file,file.name)
     for name in ['DATA_POLICY.md','TRAIN_ONLY_README.md','THU_NGHIEM_TIEP.md',
-                 'train_only_report.json','train_only.ipynb']:
+                 'train_only_report.json','train_only.ipynb','train_validation_notes.json',
+                 'fresh_validation_proof.json']:
         if (root/name).exists():add(root/name,name)
     for name in ['metrics.json','evaluation_info.json','validation_prediction.csv','training_validation_errors.json']:
         add(review/name,'validation_review/'+name)
+    for folder in ['model_bundle/cached_phobert','model_bundle/balanced_phobert',
+                   'model_bundle/aspect_pair','model_bundle/visobert',
+                   'label_attention_results','normalized_attention_results']:
+        path=root/folder
+        for name in ['config.json','run_info.json','history.csv','metrics.json']:
+            if (path/name).is_file():add(path/name,'selection_history/'+folder+'/'+name)
     allowed=['adapter.pt','config.json','run_info.json','metrics.json',
         'selection_metrics.json','history.csv','tune_scores.npz',
         'best_tuning_predictions.npz','validation_scores.npz','validation_probabilities.npz']

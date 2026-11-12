@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-12T12:16:45.470411+00:00",
+  "updated_utc": "2026-11-12T13:28:26.962950+00:00",
   "mode": "train_only",
   "blind_file_use_allowed": false,
   "raw_input": "train.csv",
@@ -113,10 +113,38 @@
         0.8845530222376603
       ],
       "model_dir": "deeper_attention_results"
+    },
+    {
+      "method": "visobert_outer80",
+      "validation_F1": 0.8396354782308206,
+      "CI95": [
+        0.8240851293512834,
+        0.853158455745765
+      ],
+      "model_dir": "outer80_local/visobert"
+    },
+    {
+      "method": "outer80_visobert_fixed_meta",
+      "validation_F1": 0.8852956070394071,
+      "CI95": [
+        0.8714412111384721,
+        0.8983558783466916
+      ],
+      "model_dir": "stacked_outer80_visobert_train_only_results"
     }
   ],
-  "running": [
-    "ViSoBERT outer80 local refit",
-    "pretrained NLI classifier head on GitHub"
+  "running": [],
+  "best_validation_F1": 0.8852956070394071,
+  "best_model_dir": "stacked_outer80_visobert_train_only_results",
+  "incomplete_experiments": [
+    {
+      "method": "pretrained NLI classifier head",
+      "github_run": 43178899945,
+      "conclusion": "cancelled after approximately 330 minutes",
+      "recorded_tuning_F1": 0.7674493458083648,
+      "validation_F1": null,
+      "trained_model_artifact_available": false,
+      "included_in_selected_model": false
+    }
   ]
 }
